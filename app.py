@@ -182,12 +182,13 @@ puzzle_html = """
                 tilePositions.push(i);
             }
             tilePositions.push(-1);
-            emptyIndex = totalTiles - 1;
             
             shuffleArray(tilePositions);
             while (!isSolvable(tilePositions)) {
                 shuffleArray(tilePositions);
             }
+            
+            emptyIndex = tilePositions.indexOf(-1);
         }
         
         function resetToComplete() {
