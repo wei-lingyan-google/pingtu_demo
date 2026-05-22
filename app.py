@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 import streamlit.components.v1 as components
 import os
@@ -9,7 +8,7 @@ st.write("✅ 点击空格相邻方块移动 | BFS最短路径自动还原")
 
 # 读取图片 + 修复所有语法错误
 image_files = [f for f in os.listdir('images') if f.endswith(('.jpg', '.jpeg', '.png'))]
-# 修复排序语法
+# 修复排序语法（按文件名中的数字排序，无数字则按原顺序）
 image_files.sort(key=lambda x: int(''.join(filter(str.isdigit, x))) if any(c.isdigit() for c in x) else 0)
 
 image_base64_list = []
@@ -22,10 +21,13 @@ for img_file in image_files:
             image_base64_list.append(f'data:{mime};base64,{b64}')
     except Exception as e:
         st.error(f"图片加载失败：{e}")
+
+# 兼容无图片情况（使用默认图片）
 if not image_base64_list:
     image_base64_list = ["https://picsum.photos/300"]
+    image_files = ["默认图片.jpg"]  # 为默认图片添加名称，避免前端报错
 
-# 🔥 彻底修复：空格不消失 + 自动还原不卡死 + BFS严格对齐C++代码
+# 🔥 修复版：增加换图控件 + 移除还原按钮 + 兼容多图片切换
 puzzle_html = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -38,6 +40,7 @@ puzzle_html = """
     .btn-group{display:flex;justify-content:center;gap:10px;margin:10px 0}
     button{padding:8px 16px;border:none;border-radius:6px;background:#667eea;color:white;cursor:pointer}
     button:hover{background:#5568d3}
+    select{padding:6px 10px;border-radius:6px;border:none;min-width:150px;}
     .info{text-align:center;font-weight:bold;margin:5px 0}
     .puzzle{max-width:350px;margin:10px auto}
     .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;background:#333;padding:3px;border-radius:8px;aspect-ratio:1}
@@ -52,11 +55,19 @@ puzzle_html = """
 </style>
 </head>
 <body>
+    <!-- 移除了原有的「还原」按钮 -->
     <div class="btn-group">
-        <button onclick="resetPuzzle()">还原</button>
         <button onclick="shufflePuzzle()">打乱</button>
         <button onclick="autoSolve()">自动还原</button>
     </div>
+
+    <!-- 新增：换图控件组 -->
+    <div class="btn-group">
+        <button onclick="prevImage()">上一张</button>
+        <select id="imageSelect" onchange="selectImage(this.value)"></select>
+        <button onclick="nextImage()">下一张</button>
+    </div>
+
     <div class="info">步数：<span id="moves">0</span></div>
     <div class="puzzle"><div class="grid" id="grid"></div></div>
 
@@ -70,6 +81,7 @@ let board = [];    // 拼图数据
 let squareImg = "";// 裁剪后的正方形图片
 let moves = 0;
 let isSolving = false; // 防止重复点击卡死
+let currentImageIndex = 0; // 当前选中的图片索引（新增）
 
 // 居中裁剪正方形（上下裁剪）
 function cropSquare(url){
@@ -141,18 +153,47 @@ function move(index){
     render();
 }
 
-// 还原：正方形裁剪 → 9格 → 编号1-8 → 0=空格（右下角）
-async function resetPuzzle(){
+// 初始化图片选择下拉框（新增）
+function initImageSelect(){
+    const select = document.getElementById('imageSelect');
+    select.innerHTML = '';
+    IMAGE_NAMES.forEach((name, idx) => {
+        const option = document.createElement('option');
+        option.value = idx;
+        option.textContent = name;
+        if(idx === currentImageIndex) option.selected = true;
+        select.appendChild(option);
+    });
+}
+
+// 切换图片：选择指定索引的图片（新增核心函数）
+async function selectImage(index){
+    currentImageIndex = parseInt(index);
+    document.getElementById('imageSelect').value = currentImageIndex;
+    // 重置拼图状态
     board = [...target];
     moves = 0;
     isSolving = false;
-    squareImg = await cropSquare(IMAGE_LIST[0]);
+    // 加载并裁剪新图片
+    squareImg = await cropSquare(IMAGE_LIST[currentImageIndex]);
     render();
 }
 
-// 打乱拼图（保证可解）
+// 上一张图片（新增）
+function prevImage(){
+    currentImageIndex = (currentImageIndex - 1 + IMAGE_LIST.length) % IMAGE_LIST.length;
+    selectImage(currentImageIndex);
+}
+
+// 下一张图片（新增）
+function nextImage(){
+    currentImageIndex = (currentImageIndex + 1) % IMAGE_LIST.length;
+    selectImage(currentImageIndex);
+}
+
+// 打乱拼图（兼容换图功能）
 function shufflePuzzle(){
-    resetPuzzle().then(()=>{
+    selectImage(currentImageIndex).then(()=>{
         for(let i=0;i<100;i++){
             const e = getEmptyIndex();
             const dirs = [-1,1,-3,3].filter(d=>{
@@ -229,18 +270,27 @@ async function executeSteps(steps){
     }
 }
 
-// 初始化
+// 初始化（替换原resetPuzzle，兼容换图）
 const IMAGE_LIST = IMAGE_LIST_PLACEHOLDER;
-resetPuzzle();
+const IMAGE_NAMES = IMAGE_NAMES_PLACEHOLDER;
+async function init(){
+    initImageSelect();
+    await selectImage(0);
+}
+init();
 </script>
 </body>
 </html>
 """
 
-# 注入图片列表
+# 注入图片列表和文件名（支持前端显示图片名称）
 image_list_str = '["' + '", "'.join(image_base64_list) + '"]'
+image_names_str = '["' + '", "'.join(image_files) + '"]'
 puzzle_html = puzzle_html.replace('IMAGE_LIST_PLACEHOLDER', image_list_str)
-components.html(puzzle_html, height=650)
+puzzle_html = puzzle_html.replace('IMAGE_NAMES_PLACEHOLDER', image_names_str)
+
+# 增加高度以容纳换图控件
+components.html(puzzle_html, height=700)
 
 st.write("---")
 st.write("💡 规则：还原=正方形裁剪+9格分块+编号1-8；自动还原采用BFS最短路径")
