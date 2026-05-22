@@ -70,6 +70,7 @@ puzzle_html = """
     <div class="header">
         <button onclick="changeImage()">换图</button>
         <button onclick="newGame()">新游戏</button>
+        <button onclick="resetPuzzle()">还原</button>
     </div>
     <div class="stats">
         <span>⏱️ 时间: <span id="timer">00:00</span></span>
@@ -104,6 +105,7 @@ puzzle_html = """
         let timer = 0;
         let timerInterval = null;
         let isPlaying = false;
+        let currentCroppedUrl = '';
         
         const images = IMAGE_LIST_PLACEHOLDER;
         let currentImageIndex = 0;
@@ -164,7 +166,7 @@ puzzle_html = """
             tiles = [];
             
             try {
-                const croppedUrl = await loadAndCropImage(images[currentImageIndex]);
+                currentCroppedUrl = await loadAndCropImage(images[currentImageIndex]);
                 
                 const totalTiles = puzzleSize * puzzleSize - 1;
                 const positions = [];
@@ -199,7 +201,7 @@ puzzle_html = """
                             
                             const bgX = (tileIndex % puzzleSize) * 100;
                             const bgY = Math.floor(tileIndex / puzzleSize) * 100;
-                            tile.style.backgroundImage = 'url(' + croppedUrl + ')';
+                            tile.style.backgroundImage = 'url(' + currentCroppedUrl + ')';
                             tile.style.backgroundPosition = bgX + '% ' + bgY + '%';
                             
                             tile.addEventListener('click', function() { onTileClick(tile); });
@@ -325,6 +327,67 @@ puzzle_html = """
         
         function newGame() {
             initPuzzle();
+        }
+        
+        function resetPuzzle() {
+            stopTimer();
+            moves = 0;
+            timer = 0;
+            isPlaying = false;
+            document.getElementById('moves').textContent = '0';
+            document.getElementById('timer').textContent = '00:00';
+            
+            const grid = document.getElementById('puzzleGrid');
+            grid.innerHTML = '';
+            tiles = [];
+            
+            try {
+                const totalTiles = puzzleSize * puzzleSize - 1;
+                const positions = [];
+                for (let i = 0; i < puzzleSize; i++) {
+                    for (let j = 0; j < puzzleSize; j++) {
+                        if (!(i === puzzleSize - 1 && j === puzzleSize - 1)) {
+                            positions.push({ row: i, col: j });
+                        }
+                    }
+                }
+                
+                shuffleArray(positions);
+                while (!isSolvableWithEmpty(positions)) {
+                    shuffleArray(positions);
+                }
+                
+                let tileIndex = 0;
+                for (let i = 0; i < puzzleSize; i++) {
+                    for (let j = 0; j < puzzleSize; j++) {
+                        if (i === puzzleSize - 1 && j === puzzleSize - 1) {
+                            const emptyTile = document.createElement('div');
+                            emptyTile.className = 'tile empty';
+                            grid.appendChild(emptyTile);
+                        } else {
+                            const pos = positions[tileIndex];
+                            const tile = document.createElement('div');
+                            tile.className = 'tile has-image';
+                            tile.dataset.originalRow = Math.floor(tileIndex / puzzleSize);
+                            tile.dataset.originalCol = tileIndex % puzzleSize;
+                            tile.dataset.currentRow = pos.row;
+                            tile.dataset.currentCol = pos.col;
+                            
+                            const bgX = (tileIndex % puzzleSize) * 100;
+                            const bgY = Math.floor(tileIndex / puzzleSize) * 100;
+                            tile.style.backgroundImage = 'url(' + currentCroppedUrl + ')';
+                            tile.style.backgroundPosition = bgX + '% ' + bgY + '%';
+                            
+                            tile.addEventListener('click', function() { onTileClick(tile); });
+                            tiles.push(tile);
+                            grid.appendChild(tile);
+                            tileIndex++;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error:', error);
+            }
         }
         
         function changeImage() {
