@@ -49,10 +49,12 @@ puzzle_html = """
         .stats { text-align: center; margin-bottom: 10px; font-weight: bold; }
         .puzzle-container { background: white; border-radius: 10px; padding: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 350px; margin: 0 auto; }
         .puzzle-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; aspect-ratio: 1; background: #333; border-radius: 6px; padding: 3px; }
-        .tile { background: #4ECDC4; background-size: 300% 300%; border-radius: 4px; cursor: pointer; transition: all 0.15s ease; display: flex; align-items: center; justify-content: center; }
-        .tile:hover { transform: scale(1.02); }
+        .tile { background: #4ECDC4; background-size: 300% 300%; border-radius: 4px; transition: all 0.15s ease; display: flex; align-items: center; justify-content: center; }
         .tile.empty { background: #333 !important; cursor: default; }
-        .tile.has-image { }
+        .tile.has-image { cursor: pointer; }
+        .tile.has-image:hover:not(.movable) { opacity: 0.7; }
+        .tile.movable { cursor: pointer; box-shadow: 0 0 10px rgba(78, 205, 196, 0.8); }
+        .tile.movable:hover { transform: scale(1.02); }
         .win-popup { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 25px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); text-align: center; z-index: 1000; }
         .win-popup.show { display: block; }
         .overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999; }
@@ -164,7 +166,9 @@ puzzle_html = """
         function isSolvable(positions) {
             let inversions = 0;
             for (let i = 0; i < positions.length; i++) {
+                if (positions[i] === -1) continue;
                 for (let j = i + 1; j < positions.length; j++) {
+                    if (positions[j] === -1) continue;
                     if (positions[i] > positions[j]) inversions++;
                 }
             }
@@ -186,6 +190,28 @@ puzzle_html = """
             }
         }
         
+        function resetToComplete() {
+            const totalTiles = puzzleSize * puzzleSize;
+            tilePositions = [];
+            for (let i = 0; i < totalTiles - 1; i++) {
+                tilePositions.push(i);
+            }
+            tilePositions.push(-1);
+            emptyIndex = totalTiles - 1;
+        }
+        
+        function isMovable(gridIndex) {
+            const row = Math.floor(gridIndex / puzzleSize);
+            const col = gridIndex % puzzleSize;
+            const emptyRow = Math.floor(emptyIndex / puzzleSize);
+            const emptyCol = emptyIndex % puzzleSize;
+            
+            const rowDiff = Math.abs(row - emptyRow);
+            const colDiff = Math.abs(col - emptyCol);
+            
+            return (rowDiff === 1 && colDiff === 0) || (rowDiff === 0 && colDiff === 1);
+        }
+        
         function renderGrid() {
             const grid = document.getElementById('puzzleGrid');
             grid.innerHTML = '';
@@ -198,8 +224,9 @@ puzzle_html = """
                     tile.className = 'tile empty';
                 } else {
                     tile.className = 'tile has-image';
-                    tile.dataset.tileIndex = tileValue;
-                    tile.dataset.gridIndex = i;
+                    if (isMovable(i)) {
+                        tile.classList.add('movable');
+                    }
                     
                     const bgX = (tileValue % puzzleSize) * 100;
                     const bgY = Math.floor(tileValue / puzzleSize) * 100;
@@ -229,35 +256,26 @@ puzzle_html = """
         
         function onTileClick(gridIndex) {
             if (tilePositions[gridIndex] === -1) return;
+            if (!isMovable(gridIndex)) return;
             
             if (!isPlaying) {
                 startTimer();
                 isPlaying = true;
             }
             
-            const row = Math.floor(gridIndex / puzzleSize);
-            const col = gridIndex % puzzleSize;
-            const emptyRow = Math.floor(emptyIndex / puzzleSize);
-            const emptyCol = emptyIndex % puzzleSize;
+            tilePositions[emptyIndex] = tilePositions[gridIndex];
+            tilePositions[gridIndex] = -1;
+            emptyIndex = gridIndex;
             
-            const rowDiff = Math.abs(row - emptyRow);
-            const colDiff = Math.abs(col - emptyCol);
+            moves++;
+            document.getElementById('moves').textContent = moves;
             
-            if ((rowDiff === 1 && colDiff === 0) || (rowDiff === 0 && colDiff === 1)) {
-                tilePositions[emptyIndex] = tilePositions[gridIndex];
-                tilePositions[gridIndex] = -1;
-                emptyIndex = gridIndex;
-                
-                moves++;
-                document.getElementById('moves').textContent = moves;
-                
-                renderGrid();
-                
-                if (checkWin()) {
-                    stopTimer();
-                    saveScore();
-                    showWinPopup();
-                }
+            renderGrid();
+            
+            if (checkWin()) {
+                stopTimer();
+                saveScore();
+                showWinPopup();
             }
         }
         
@@ -309,7 +327,7 @@ puzzle_html = """
             document.getElementById('moves').textContent = '0';
             document.getElementById('timer').textContent = '00:00';
             
-            initTilePositions();
+            resetToComplete();
             renderGrid();
         }
         
@@ -369,4 +387,4 @@ st.write(f"📷 已加载 {len(image_base64_list)} 张图片")
 components.html(puzzle_html, height=700)
 
 st.write("---")
-st.write("💡 **游戏说明**：点击空格相邻的方块，将图片恢复完整！")
+st.write("💡 **游戏说明**：点击空格相邻的方块移动，将图片恢复完整！")
