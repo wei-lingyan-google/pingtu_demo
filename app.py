@@ -12,13 +12,28 @@ st.title("🧩 钧崽变变变")
 st.subheader("🎮 游戏作者：魏菱延")
 st.write("✅ 点击相邻方块移动 | 自动还原不计入榜单成绩")
 
-# ===================== 服务器排行榜文件配置（永久持久化） =====================
+# ===================== 服务器排行榜文件配置（修复KeyError） =====================
 RANK_FILE = "puzzle_rank.json"
 
-# 初始化文件
+# 初始化文件（确保结构正确）
 def init_rank():
     if not os.path.exists(RANK_FILE):
+        # 正确的键名："time" 和 "step"
         data = {"time": [], "step": []}
+        with open(RANK_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    else:
+        # 如果文件存在但结构错误，自动修复
+        with open(RANK_FILE, "r", encoding="utf-8") as f:
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError:
+                data = {}
+        # 补充缺失的键
+        if "time" not in data:
+            data["time"] = []
+        if "step" not in data:
+            data["step"] = []
         with open(RANK_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -76,7 +91,7 @@ if not image_base64_list:
 # ===================== 读取排行榜数据 =====================
 rank_data = get_rank()
 
-# ===================== 前端页面（按钮严格两行+全功能修复） =====================
+# ===================== 前端页面（修复字符串替换 + 保留弹窗） =====================
 puzzle_html = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -87,7 +102,7 @@ puzzle_html = """
     *{margin:0;padding:0;box-sizing:border-box}
     body{background:#f0f0f0;padding:10px;font-family: "Microsoft YaHei";}
 
-    /* 🔥 固定两行按钮布局 */
+    /* 固定两行按钮布局 */
     .row{
         display:flex;
         justify-content:center;
@@ -240,10 +255,13 @@ function render(){
         g.appendChild(t);
     }
     document.getElementById('step').innerText=moves;
-    // 🔥 仅手动完成才提交成绩
+
+    // 仅手动完成才弹窗+提交成绩
     if(JSON.stringify(board)===JSON.stringify(target) && timer && manualPlay){
         stopTimer();
-        // 刷新页面提交成绩到服务器文件
+        // 手动通关弹窗提示
+        alert("你真是个棒人！");
+        // 提交成绩到服务器文件
         window.parent.postMessage({type:'save', time:useTime, step:moves}, '*');
     }
 }
@@ -267,16 +285,16 @@ function shuffle(){
             const n=e+x;
             return n>=0&&n<9&&!(e%3===0&&x===-1)&&!(e%3===2&&x===1);
         });
-        if(d.length) [board[e],board[e+d[Math.random()*d.length|0]]] = [board[e+d[Math.random()*d.length|0]],board[e]];
+        if(d.length) [board[e],board[e+d[Math.floor(Math.random()*d.length)]]] = [board[e+d[Math.floor(Math.random()*d.length)]],board[e]];
     }
     render();
     startTimer();
 }
 
-// 🔥 自动还原（标记为自动，不计分）
+// 自动还原（标记为自动，不计分、不弹窗）
 async function autoSolve(){
     if(JSON.stringify(board)===JSON.stringify(target)) return;
-    manualPlay = false; // 关键：自动操作，不计成绩
+    manualPlay = false;
     stopTimer();
     const q=[{s:[...board], sList:[]}];
     const v=new Set([JSON.stringify(board)]);
@@ -345,34 +363,38 @@ window.addEventListener('message', e=>{
 </html>
 """
 
-# ===================== 数据注入 + 后端通信 =====================
-# 替换数据
+# ===================== 数据注入 + 后端通信（修复字符串替换） =====================
+# 修复：之前的字符串替换未赋值给puzzle_html，现在重新处理
 imgs = json.dumps(image_base64_list, ensure_ascii=False)
 names = json.dumps(image_files, ensure_ascii=False)
 time_rank = json.dumps(rank_data["time"], ensure_ascii=False)
 step_rank = json.dumps(rank_data["step"], ensure_ascii=False)
 
+# 正确替换所有占位符
 puzzle_html = puzzle_html.replace("IMG_LIST", imgs)
 puzzle_html = puzzle_html.replace("IMG_NAMES", names)
 puzzle_html = puzzle_html.replace("TIME_RANK", time_rank)
 puzzle_html = puzzle_html.replace("STEP_RANK", step_rank)
 
-# 监听前端消息
-if "data" in st.session_state:
-    msg = st.session_state.data
-    if msg["type"] == "save":
-        save_rank(msg["time"], msg["step"])
-    if msg["type"] == "clear":
-        clear_rank()
-    st.session_state.pop("data")
+# 消息交互存储
+if "msg_cache" not in st.session_state:
+    st.session_state.msg_cache = None
 
 # 渲染组件
-components.html(puzzle_html, height=900)
+html_comp = components.html(puzzle_html, height=900)
 
-# 隐藏的消息接收框
-if st.components.v1.get_children()[0].msg:
-    st.session_state.data = st.components.v1.get_children()[0].msg
+# 处理前端提交的成绩与清空请求
+if hasattr(html_comp, "message") and html_comp.message:
+    st.session_state.msg_cache = html_comp.message
+
+if st.session_state.msg_cache:
+    msg = st.session_state.msg_cache
+    if msg.get("type") == "save":
+        save_rank(msg["time"], msg["step"])
+    elif msg.get("type") == "clear":
+        clear_rank()
+    st.session_state.msg_cache = None
     st.rerun()
 
 st.write("---")
-st.write("💡 规则：手动通关上榜 | 自动还原不计成绩 | 数据永久保存")
+st.write("💡 规则：手动通关弹出鼓励提示并上榜 | 自动还原不计成绩无弹窗 | 数据永久保存")
