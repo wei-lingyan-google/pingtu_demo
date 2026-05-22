@@ -3,7 +3,6 @@ import streamlit.components.v1 as components
 import os
 import base64
 import json
-# 修复：原代码缺失的导入，运行必报错
 from PIL import Image
 import io
 
@@ -14,7 +13,7 @@ st.subheader("🎮 游戏作者：魏菱延")
 st.write("✅ 点击相邻方块移动 | 自动还原不计入榜单成绩")
 
 # ===================== 服务器排行榜文件操作 =====================
-RANK_FILE = "puzzle_rank.json"
+RANK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "puzzle_rank.json")
 
 def init_rank_file():
     if not os.path.exists(RANK_FILE):
@@ -31,8 +30,14 @@ def save_score(time_sec: int, step: int):
     if time_sec <= 0 or step <= 0:
         return
     data = load_rank()
-    data["time_rank"].append({"time": time_sec, "text": f"{time_sec//60:02d}:{time_sec%60:02d}"})
-    data["step_rank"].append({"step": step})
+    # 去重处理
+    time_exists = any(item["time"] == time_sec for item in data["time_rank"])
+    step_exists = any(item["step"] == step for item in data["step_rank"])
+    if not time_exists:
+        data["time_rank"].append({"time": time_sec, "text": f"{time_sec//60:02d}:{time_sec%60:02d}"})
+    if not step_exists:
+        data["step_rank"].append({"step": step})
+    # 排序并截取前5名
     data["time_rank"] = sorted(data["time_rank"], key=lambda x: x["time"])[:5]
     data["step_rank"] = sorted(data["step_rank"], key=lambda x: x["step"])[:5]
     with open(RANK_FILE, "w", encoding="utf-8") as f:
@@ -68,27 +73,32 @@ if not image_base64_list:
     image_base64_list = [f'data:image/jpeg;base64,{b64}']
     image_files = ["默认图片.jpg"]
 
-# ===================== 后端参数监听 =====================
+# ===================== 后端参数监听（修复执行顺序） =====================
 init_rank_file()
-rank_data = load_rank()
 params = st.query_params
 
 if "save" in params:
     try:
         t = int(params.get("time", 0))
         s = int(params.get("step", 0))
-        save_score(t, s)
-    except:
-        pass
-    st.query_params.clear()
+        if t > 0 and s > 0:
+            save_score(t, s)
+            st.success(f"🎉 成绩已保存：{t}秒，{s}步")
+    except Exception as e:
+        st.error(f"❌ 保存失败：{e}")
     st.rerun()
+    st.query_params.clear()
 
 if "clear" in params:
     clear_rank()
-    st.query_params.clear()
+    st.success("🧹 排行榜已清空")
     st.rerun()
+    st.query_params.clear()
 
-# ===================== 前端代码（按钮严格2行布局 + 优化提示） =====================
+# 最后加载排行榜数据
+rank_data = load_rank()
+
+# ===================== 前端代码（修复数据传递和提交逻辑） =====================
 puzzle_html = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -96,105 +106,39 @@ puzzle_html = """
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
+    /* 保持原有样式不变 */
     *{margin:0;padding:0;box-sizing:border-box}
     body{background:#f0f0f0;padding:10px;font-family: "Microsoft YaHei";}
-
-    /* 🔥 严格两行按钮布局，固定居中，不挤压 */
-    .button-row {
-        display: flex;
-        justify-content: center;
-        gap: 12px;
-        margin: 10px 0;
-        width: 100%;
-    }
-    button {
-        padding: 10px 16px;
-        border: none;
-        border-radius: 6px;
-        background: #667eea;
-        color: white;
-        font-size: 14px;
-        cursor: pointer;
-        white-space: nowrap;
-    }
+    .button-row {display: flex;justify-content: center;gap: 12px;margin: 10px 0;width: 100%;}
+    button {padding: 10px 16px;border: none;border-radius: 6px;background: #667eea;color: white;font-size: 14px;cursor: pointer;white-space: nowrap;}
     button:hover {background: #5568d3;}
-    select {
-        padding: 8px 12px;
-        border-radius: 6px;
-        border: none;
-        font-size: 14px;
-    }
-
-    .info{
-        text-align:center;
-        font-weight:bold;
-        margin:10px 0;
-        font-size:16px;
-    }
+    select {padding: 8px 12px;border-radius: 6px;border: none;font-size: 14px;}
+    .info{text-align:center;font-weight:bold;margin:10px 0;font-size:16px;}
     .puzzle{max-width:320px;margin:0 auto;}
-    .grid{
-        display:grid;
-        grid-template-columns:repeat(3,1fr);
-        gap:2px;
-        background:#333;
-        padding:2px;
-        border-radius:8px;
-        aspect-ratio:1;
-    }
-    .tile{
-        background:#fff;
-        background-size:300% 300%;
-        border-radius:4px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:24px;
-        color:#fff;
-        text-shadow:0 0 2px #000;
-    }
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;background:#333;padding:2px;border-radius:8px;aspect-ratio:1;}
+    .tile{background:#fff;background-size:300% 300%;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:24px;color:#fff;text-shadow:0 0 2px #000;}
     .tile.empty{background:#333!important;}
     .tile.movable{box-shadow:0 0 5px #4ECDC4;}
-
-    /* 排行榜样式 */
-    .rank-container{
-        max-width:320px;
-        margin:15px auto;
-        display:flex;
-        gap:10px;
-    }
-    .rank-box{
-        flex:1;
-        background:#fff;
-        padding:10px;
-        border-radius:8px;
-        text-align:center;
-    }
+    .rank-container{max-width:320px;margin:15px auto;display:flex;gap:10px;}
+    .rank-box{flex:1;background:#fff;padding:10px;border-radius:8px;text-align:center;}
     .rank-title{font-weight:bold;color:#667eea;margin-bottom:5px;}
     .rank-item{font-size:12px;padding:3px 0;}
-    .clear-btn{
-        display:block;
-        margin:10px auto;
-        background:#ff6b6b;
-    }
+    .clear-btn{display:block;margin:10px auto;background:#ff6b6b;}
 </style>
 </head>
 <body>
-    <!-- 🔥 第一行按钮：打乱 + 自动还原 -->
+    <!-- 保持原有HTML结构不变 -->
     <div class="button-row">
         <button onclick="shufflePuzzle()">🔀 打乱</button>
         <button onclick="autoSolve()">🤖 自动还原</button>
     </div>
-
-    <!-- 🔥 第二行按钮：上一张 + 下一张 + 图片选择 -->
     <div class="button-row">
         <button onclick="prevImage()">⬅️ 上一张</button>
         <button onclick="nextImage()">➡️ 下一张</button>
         <select id="imageSelect" onchange="selectImage(this.value)"></select>
     </div>
-
     <div class="info">步数：<span id="moves">0</span>  时长：<span id="time">00:00</span></div>
     <div class="puzzle"><div id="grid" class="grid"></div></div>
-
     <button class="clear-btn" onclick="clearRank()">清空排行榜</button>
     <div class="rank-container">
         <div class="rank-box">
@@ -248,7 +192,6 @@ function resetTimer() {
     document.getElementById("time").textContent = "00:00";
 }
 
-// 修复图片加载，防止黑屏
 async function cropSquare(url){
     if(imageCache[url]) return imageCache[url];
     return new Promise(res=>{
@@ -280,7 +223,6 @@ async function cropSquare(url){
 const getEmptyIndex = () => board.findIndex(v => v === 0);
 const isSolved = () => JSON.stringify(board) === JSON.stringify(target);
 
-// 优化渲染，流畅不卡顿
 function render(){
     const grid = document.getElementById('grid');
     const emptyIdx = getEmptyIndex();
@@ -313,7 +255,7 @@ function render(){
     grid.appendChild(fragment);
     document.getElementById('moves').textContent = moves;
 
-    // 仅手动通关触发提示+提交成绩
+    // 手动通关触发提交
     if(isSolved() && timer && manualPlay){
         stopTimer();
         submitScore();
@@ -359,7 +301,6 @@ function nextImage(){
     selectImage(currentImageIndex);
 }
 
-// 默认打乱，不显示原图
 function autoShuffleBoard(){
     for(let i=0;i<70;i++){
         const e = getEmptyIndex();
@@ -386,29 +327,50 @@ function shufflePuzzle(){
     autoShuffleBoard();
 }
 
-// 🔥 优化：手动通关提示 + 提交成绩
+// 修复：使用parent.location确保参数被Streamlit捕获
 function submitScore() {
     if(elapsedTime <= 0 || moves <= 0) return;
     alert("你真是个棒人！！");
-    window.location.search = `save=1&time=${elapsedTime}&step=${moves}`;
+    // 关键修复：使用window.parent.location.href
+    const url = new URL(window.parent.location.href);
+    url.searchParams.set('save', '1');
+    url.searchParams.set('time', elapsedTime);
+    url.searchParams.set('step', moves);
+    url.searchParams.set('t', Date.now()); // 避免缓存
+    window.parent.location.href = url.toString();
 }
 
 function clearRank() {
-    window.location.search = `clear=1`;
+    const url = new URL(window.parent.location.href);
+    url.searchParams.set('clear', '1');
+    url.searchParams.set('t', Date.now());
+    window.parent.location.href = url.toString();
 }
 
+// 修复：添加空数据处理和调试输出
 function renderServerRank() {
+    console.log("服务器时间排行数据：", SERVER_TIME_RANK);
+    console.log("服务器步数排行数据：", SERVER_STEP_RANK);
     const timeDom = document.getElementById('timeRank');
     const stepDom = document.getElementById('stepRank');
-    timeDom.innerHTML = SERVER_TIME_RANK.map((item, i) => 
-        `<div class="rank-item">${i+1}. ${item.text}</div>`
-    ).join('');
-    stepDom.innerHTML = SERVER_STEP_RANK.map((item, i) => 
-        `<div class="rank-item">${i+1}. ${item.step}步</div>`
-    ).join('');
+    
+    if (SERVER_TIME_RANK.length === 0) {
+        timeDom.innerHTML = '<div class="rank-item">暂无数据</div>';
+    } else {
+        timeDom.innerHTML = SERVER_TIME_RANK.map((item, i) => 
+            `<div class="rank-item">${i+1}. ${item.text}</div>`
+        ).join('');
+    }
+    
+    if (SERVER_STEP_RANK.length === 0) {
+        stepDom.innerHTML = '<div class="rank-item">暂无数据</div>';
+    } else {
+        stepDom.innerHTML = SERVER_STEP_RANK.map((item, i) => 
+            `<div class="rank-item">${i+1}. ${item.step}步</div>`
+        ).join('');
+    }
 }
 
-// 🔥 优化：自动还原提示 + 不计成绩
 async function autoSolve(){
     if(isSolved() || isSolving) return;
     isSolving = true;
@@ -423,7 +385,6 @@ async function autoSolve(){
             await executeSteps(cur.steps);
             isSolving = false;
             stopTimer();
-            // 自动还原完成提示
             alert("你是不是不行，还得自动还原。");
             return;
         }
@@ -465,9 +426,9 @@ init();
 </html>
 """
 
-# 数据替换
-image_list_str = '["' + '", "'.join(image_base64_list) + '"]'
-image_names_str = '["' + '", "'.join(image_files) + '"]'
+# 修复：使用json.dumps确保数据格式正确
+image_list_str = json.dumps(image_base64_list)
+image_names_str = json.dumps(image_files)
 time_rank_str = json.dumps(rank_data["time_rank"], ensure_ascii=False)
 step_rank_str = json.dumps(rank_data["step_rank"], ensure_ascii=False)
 
