@@ -43,6 +43,16 @@ puzzle_html = """
         .header button { padding: 8px 16px; font-size: 14px; border: none; border-radius: 6px; background: #667eea; color: white; cursor: pointer; }
         .header button:hover { background: #5a6fd6; }
         .stats { text-align: center; margin-bottom: 10px; font-weight: bold; }
+        /* 原图展示区域 */
+        .original-image { 
+            max-width: 350px; 
+            margin: 0 auto 15px; 
+            display: none; /* 默认隐藏 */
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .original-image img { width: 100%; display: block; }
         .puzzle-container { background: white; border-radius: 10px; padding: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 350px; margin: 0 auto; }
         .puzzle-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; aspect-ratio: 1; background: #333; border-radius: 6px; padding: 3px; }
         .tile { 
@@ -87,6 +97,12 @@ puzzle_html = """
         <span>⏱️ 时间: <span id="timer">00:00</span></span>
         <span style="margin-left: 20px;">👣 步数: <span id="moves">0</span></span>
     </div>
+
+    <!-- 原图展示区域 -->
+    <div class="original-image" id="originalImage">
+        <img id="originalImg" src="" alt="原图">
+    </div>
+
     <div class="puzzle-container">
         <div class="puzzle-grid" id="puzzleGrid"></div>
     </div>
@@ -124,7 +140,7 @@ puzzle_html = """
         
         const images = IMAGE_LIST_PLACEHOLDER;
         let tiles = [];
-        // ✅ 核心修复：空格【永久固定在右下角（索引8）】，绝不改变！
+        // 核心：空格永久固定在右下角（索引8）
         const SPACE_INDEX = 8;
 
         // 加载裁剪图片
@@ -144,21 +160,26 @@ puzzle_html = """
             });
         }
 
-        // ✅ 核心：初始化正确拼图（1-8顺序，右下角空格）
+        // 初始化正确拼图：1-8顺序，右下角空格（基准拼图）
         function initCorrectTiles() {
             tiles = [0,1,2,3,4,5,6,7,8];
+            // 还原时显示原图
+            document.getElementById('originalImage').style.display = 'block';
+            document.getElementById('originalImg').src = images[currentImageIndex];
         }
 
-        // ✅ 核心：只打乱前8块，空格永久固定在最后一位（右下角）
+        // 核心：基于正确拼图打乱，仅打乱前8块，空格固定最后
         function initShuffledTiles() {
             tiles = [0,1,2,3,4,5,6,7];
-            // 打乱数组（仅前8块）
+            // 随机打乱前8个拼图块
             for (let i = tiles.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
             }
-            // 最后一位强制为空格（8），绝不修改！
+            // 强制最后一位为空格，绝不修改
             tiles.push(8);
+            // 打乱时隐藏原图
+            document.getElementById('originalImage').style.display = 'none';
         }
 
         // 判断是否完成拼图
@@ -190,7 +211,7 @@ puzzle_html = """
                     tile.className = 'tile empty';
                 } else {
                     tile.className = 'tile has-image';
-                    tile.textContent = val + 1; // 显示1-8
+                    tile.textContent = val + 1; // 显示编号1-8
                     if (isMovable(i)) tile.classList.add('movable');
                     
                     const col = val % N;
@@ -223,11 +244,10 @@ puzzle_html = """
             isAutoSolving = true;
             stopTimer();
             
-            // 一步一步还原到正确顺序
-            const target = [0,1,2,3,4,5,6,7,8];
+            // 还原到基准拼图
             while (!isTarget()) {
                 for (let i = 0; i < N2-1; i++) {
-                    if (tiles[i] !== target[i] && isMovable(i)) {
+                    if (tiles[i] !== i && isMovable(i)) {
                         [tiles[i], tiles[SPACE_INDEX]] = [tiles[SPACE_INDEX], tiles[i]];
                         moves++;
                         document.getElementById('moves').textContent = moves;
@@ -271,8 +291,19 @@ puzzle_html = """
             loadLeaderboard();
         }
 
-        function newGame() { initShuffledTiles(); renderGrid(); resetGameStats(); }
-        function resetPuzzle() { initCorrectTiles(); renderGrid(); resetGameStats(); }
+        // 新游戏：打乱拼图，隐藏原图
+        function newGame() { 
+            initShuffledTiles(); 
+            renderGrid(); 
+            resetGameStats(); 
+        }
+
+        // 还原：恢复基准拼图，显示完整原图
+        function resetPuzzle() { 
+            initCorrectTiles(); 
+            renderGrid(); 
+            resetGameStats(); 
+        }
 
         // 弹窗与排行榜
         function showWinPopup() {
@@ -321,7 +352,7 @@ image_list_str = '["' + '", "'.join(image_base64_list) + '"]'
 puzzle_html = puzzle_html.replace('IMAGE_LIST_PLACEHOLDER', image_list_str)
 
 st.write(f"📷 已加载 {len(image_base64_list)} 张图片")
-components.html(puzzle_html, height=750)
+components.html(puzzle_html, height=800)
 
 st.write("---")
 st.write("💡 **游戏说明**：点击空格相邻的方块移动，将图片恢复完整！")
