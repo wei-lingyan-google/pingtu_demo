@@ -7,9 +7,10 @@ import base64
 st.title("🧩 钧崽变变变")
 st.write("✅ 点击空格相邻方块移动 | 基于BFS最短路径自动还原")
 
-# 读取图片 + 修复排序语法错误
+# 读取图片并修复排序语法错误
 image_files = [f for f in os.listdir('images') if f.endswith(('.jpg', '.jpeg', '.png'))]
-image_files.sort(key=lambda x: int(''.join(filter(str.isdigit, x))) if any(c.isdigit, x) else 0)
+# ✅ 修复：补全 c.isdigit() 并修正 any 的用法
+image_files.sort(key=lambda x: int(''.join(filter(str.isdigit, x))) if any(c.isdigit() for c in x) else 0)
 
 image_base64_list = []
 for img_file in image_files:
@@ -17,14 +18,14 @@ for img_file in image_files:
         with open(os.path.join('images', img_file), 'rb') as f:
             b64 = base64.b64encode(f.read()).decode('utf-8')
             ext = img_file.split('.')[-1]
-            mime = 'image/jpeg' if ext in ('jpg','jpeg') else 'image/png'
+            mime = 'image/jpeg' if ext in ('jpg', 'jpeg') else 'image/png'
             image_base64_list.append(f'data:{mime};base64,{b64}')
     except Exception as e:
-        st.error(f"加载失败：{e}")
+        st.error(f"图片加载失败：{e}")
 if not image_base64_list:
     image_base64_list = ["https://picsum.photos/300"]
 
-# 核心：BFS自动还原 + 正确拼图逻辑
+# 核心HTML：修复BFS自动还原 + 正确拼图逻辑
 puzzle_html = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -62,16 +63,15 @@ puzzle_html = """
 <script>
 const N = 3;
 const N2 = 9;
-// 对应C++：上下左右移动
-const dx = [0, 0, -1, 1]; 
+const dx = [0, 0, -1, 1]; // 上下左右
 const dy = [1, -1, 0, 0];
 
 let tiles = [1,2,3,4,5,6,7,8,9]; // 9=空格
 let squareImg = "";
 let moves = 0;
-const target = [1,2,3,4,5,6,7,8,9]; // 正确目标
+const target = [1,2,3,4,5,6,7,8,9];
 
-// 居中裁剪正方形（上下/左右裁剪）
+// 居中裁剪正方形
 function cropSquare(url){
     return new Promise(res=>{
         const img = new Image();
@@ -84,11 +84,12 @@ function cropSquare(url){
             ctx.drawImage(img, (img.width-size)/2, (img.height-size)/2, size, size, 0,0,size,size);
             res(canvas.toDataURL());
         };
+        img.onerror = () => res('https://picsum.photos/300');
         img.src = url;
     });
 }
 
-// 获取空格位置（值为9）
+// 获取空格位置
 function getEmptyPos(){ return tiles.findIndex(v=>v===9) }
 
 // 检查是否完成
@@ -107,14 +108,12 @@ function render(){
         }else{
             t.className = 'tile';
             t.textContent = val;
-            // 正确分块显示
             const idx = val - 1;
             const col = idx % 3;
             const row = Math.floor(idx / 3);
             t.style.backgroundImage = `url(${squareImg})`;
             t.style.backgroundPosition = `${col*50}% ${row*50}%`;
             
-            // 判断可移动
             const ex = Math.floor(empty/3), ey = empty%3;
             const ix = Math.floor(i/3), iy = i%3;
             if(Math.abs(ex-ix)+Math.abs(ey-iy)===1){
@@ -135,7 +134,7 @@ function move(idx){
     render();
 }
 
-// 重置：正确拼图（裁正方形→9格→1-8编号→9空格）
+// 重置拼图（裁正方形→9格→1-8编号→9空格）
 async function resetPuzzle(){
     tiles = [...target];
     moves = 0;
@@ -143,7 +142,7 @@ async function resetPuzzle(){
     render();
 }
 
-// 打乱拼图（可解）
+// 打乱拼图（保证可解）
 function shufflePuzzle(){
     resetPuzzle().then(()=>{
         for(let i=0;i<150;i++){
@@ -162,11 +161,10 @@ function shufflePuzzle(){
     });
 }
 
-// ====================== BFS 自动还原（完全参考你的C++代码）======================
+// ====================== BFS自动还原（参考C++代码实现）======================
 async function autoSolveByBFS(){
     if(isWin()) return;
     
-    // BFS节点结构
     class Node {
         constructor(state, space, path){
             this.state = [...state];
@@ -186,7 +184,6 @@ async function autoSolveByBFS(){
     while(queue.length > 0){
         const cur = queue.shift();
         
-        // 找到目标，执行路径
         if(JSON.stringify(cur.state) === JSON.stringify(target)){
             await runPath(cur.path);
             return;
@@ -195,7 +192,6 @@ async function autoSolveByBFS(){
         const sx = Math.floor(cur.space / N);
         const sy = cur.space % N;
 
-        // 四个方向遍历（对应C++逻辑）
         for(let i=0;i<4;i++){
             const tx = sx + dx[i];
             const ty = sy + dy[i];
@@ -204,7 +200,6 @@ async function autoSolveByBFS(){
             const newSpace = tx * N + ty;
             const newState = [...cur.state];
             
-            // 交换空格（对应C++ swap）
             [newState[cur.space], newState[newSpace]] = [newState[newSpace], newState[cur.space]];
             const key = JSON.stringify(newState);
 
@@ -240,8 +235,10 @@ resetPuzzle();
 </html>
 """
 
-# 注入图片
-puzzle_html = puzzle_html.replace("IMAGE_LIST_PLACEHOLDER", str(image_base64_list))
+# 注入图片列表
+image_list_str = '["' + '", "'.join(image_base64_list) + '"]'
+puzzle_html = puzzle_html.replace('IMAGE_LIST_PLACEHOLDER', image_list_str)
+
 components.html(puzzle_html, height=650)
 
 st.write("---")
