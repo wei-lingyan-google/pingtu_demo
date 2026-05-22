@@ -42,48 +42,59 @@ if not image_base64_list:
     image_base64_list = [f'data:image/jpeg;base64,{b64}']
     image_files = ["默认图片.jpg"]
 
-# ===================== 核心：处理URL参数（先处理，再渲染页面） =====================
-params = st.query_params
+# ===================== 核心：读取iframe localStorage中的成绩 =====================
+# 用JS读取localStorage中的成绩数据
+score_data = st.js_execute("""
+const data = localStorage.getItem('puzzle_score');
+if (data) {
+    localStorage.removeItem('puzzle_score'); // 读取后清除，避免重复提交
+    return JSON.parse(data);
+}
+return null;
+""")
 
-# 保存成绩逻辑（必须放在最前面）
-if "save" in params:
-    try:
-        t = int(params.get("time", 0))
-        s = int(params.get("step", 0))
-        if t > 0 and s > 0:
-            # 保存到session_state排行榜
-            st.session_state.rank_data["time_rank"].append({
-                "time": t,
-                "text": f"{t//60:02d}:{t%60:02d}"
-            })
-            st.session_state.rank_data["step_rank"].append({"step": s})
-            
-            # 排序并保留前5名
-            st.session_state.rank_data["time_rank"] = sorted(
-                st.session_state.rank_data["time_rank"],
-                key=lambda x: x["time"]
-            )[:5]
-            st.session_state.rank_data["step_rank"] = sorted(
-                st.session_state.rank_data["step_rank"],
-                key=lambda x: x["step"]
-            )[:5]
-            
-            # 显示绿色提示条
-            st.success(f"🎉 成绩已上榜！{t//60:02d}:{t%60:02d} | {s}步")
-    except Exception as e:
-        st.error(f"❌ 保存失败：{e}")
-    # 清除参数并刷新页面
-    st.query_params.clear()
-    st.rerun()
+# 处理成绩数据
+if score_data:
+    time_sec = score_data.get("time", 0)
+    step = score_data.get("step", 0)
+    if time_sec > 0 and step > 0:
+        # 保存到排行榜
+        st.session_state.rank_data["time_rank"].append({
+            "time": time_sec,
+            "text": f"{time_sec//60:02d}:{time_sec%60:02d}"
+        })
+        st.session_state.rank_data["step_rank"].append({"step": step})
+        
+        # 排序并保留前5名
+        st.session_state.rank_data["time_rank"] = sorted(
+            st.session_state.rank_data["time_rank"],
+            key=lambda x: x["time"]
+        )[:5]
+        st.session_state.rank_data["step_rank"] = sorted(
+            st.session_state.rank_data["step_rank"],
+            key=lambda x: x["step"]
+        )[:5]
+        
+        # 显示绿色提示条
+        st.success(f"🎉 成绩已上榜！{time_sec//60:02d}:{time_sec%60:02d} | {step}步")
+        st.rerun()
 
-# 清空排行榜逻辑
-if "clear" in params:
+# 清空排行榜逻辑（改用localStorage）
+clear_data = st.js_execute("""
+const clear = localStorage.getItem('clear_rank');
+if (clear) {
+    localStorage.removeItem('clear_rank');
+    return true;
+}
+return false;
+""")
+
+if clear_data:
     st.session_state.rank_data = {"time_rank": [], "step_rank": []}
     st.success("🧹 排行榜已清空")
-    st.query_params.clear()
     st.rerun()
 
-# ===================== 前端HTML游戏代码（修复语法问题） =====================
+# ===================== 前端HTML游戏代码（修复通信方式，无跨域跳转） =====================
 puzzle_html = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -99,6 +110,7 @@ puzzle_html = """
     select {padding: 8px 12px;border-radius: 6px;border: none;font-size: 14px;}
     .info{text-align:center;font-weight:bold;margin:10px 0;font-size:16px;}
     .puzzle{max-width:320px;margin:0 auto;}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;background:#333;padding:2px;border-radius:8px;aspect-ratio:1;}
     .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;background:#333;padding:2px;border-radius:8px;aspect-ratio:1;}
     .tile{background:#fff;background-size:300% 300%;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:24px;color:#fff;text-shadow:0 0 2px #000;}
     .tile.empty{background:#333!important;}
@@ -269,23 +281,20 @@ function autoShuffleBoard(){
 
 function shufflePuzzle(){ moves=0; resetTimer(); manualPlay=true; autoShuffleBoard(); }
 
-// 改用URL传参，彻底删除错误API
+// ===================== 关键修复：用localStorage传递数据，不跳URL =====================
 function submitScore() {
     if(elapsedTime<=0||moves<=0) return;
     alert("你真是个棒人！！");
-    const url = new URL(window.parent.location.href);
-    url.searchParams.set('save', '1');
-    url.searchParams.set('time', elapsedTime);
-    url.searchParams.set('step', moves);
-    url.searchParams.set('t', Date.now());
-    window.parent.location.href = url.toString();
+    // 把成绩数据存到localStorage，父页面会自动读取
+    localStorage.setItem('puzzle_score', JSON.stringify({
+        time: elapsedTime,
+        step: moves
+    }));
+    // 不跳URL，页面会自动刷新
 }
 
 function clearRank() {
-    const url = new URL(window.parent.location.href);
-    url.searchParams.set('clear', '1');
-    url.searchParams.set('t', Date.now());
-    window.parent.location.href = url.toString();
+    localStorage.setItem('clear_rank', 'true');
 }
 
 function renderServerRank() {
@@ -331,19 +340,18 @@ init();
 </html>
 """
 
-# ===================== 数据注入（修复JSON转义问题） =====================
+# ===================== 数据注入 =====================
 image_list_str = json.dumps(image_base64_list)
 image_names_str = json.dumps(image_files)
 time_rank_str = json.dumps(st.session_state.rank_data["time_rank"], ensure_ascii=False)
 step_rank_str = json.dumps(st.session_state.rank_data["step_rank"], ensure_ascii=False)
 
-# 安全替换占位符
 puzzle_html = puzzle_html.replace('IMAGE_LIST_PLACEHOLDER', image_list_str)
 puzzle_html = puzzle_html.replace('IMAGE_NAMES_PLACEHOLDER', image_names_str)
 puzzle_html = puzzle_html.replace('SERVER_TIME_RANK_PLACEHOLDER', time_rank_str)
 puzzle_html = puzzle_html.replace('SERVER_STEP_RANK_PLACEHOLDER', step_rank_str)
 
-# ===================== 渲染游戏（简化调用，兼容所有Streamlit版本） =====================
+# ===================== 渲染游戏（纯components.html，无自定义组件） =====================
 components.html(puzzle_html, height=900)
 
 st.write("---")
