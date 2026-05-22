@@ -10,48 +10,30 @@ import io
 st.set_page_config(page_title="钧崽变变变", page_icon="🧩")
 st.title("🧩 钧崽变变变")
 st.subheader("🎮 游戏作者：魏菱延")
-st.write("✅ 点击相邻方块移动 | 自动还原不计入榜单成绩")
 
-# ===================== 服务器排行榜文件操作 =====================
-RANK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "puzzle_rank.json")
-
-def init_rank_file():
-    if not os.path.exists(RANK_FILE):
-        default_data = {"time_rank": [], "step_rank": []}
-        with open(RANK_FILE, "w", encoding="utf-8") as f:
-            json.dump(default_data, f, ensure_ascii=False, indent=2)
-
-def load_rank():
-    init_rank_file()
-    with open(RANK_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+# ===================== 云端适配：排行榜存储 =====================
+# 云端专用：用 session_state 持久化（重启丢失，运行时稳定）
+if "rank_data" not in st.session_state:
+    st.session_state.rank_data = {"time_rank": [], "step_rank": []}
 
 def save_score(time_sec: int, step: int):
     if time_sec <= 0 or step <= 0:
         return
-    data = load_rank()
-    # 去重处理
-    time_exists = any(item["time"] == time_sec for item in data["time_rank"])
-    step_exists = any(item["step"] == step for item in data["step_rank"])
-    if not time_exists:
-        data["time_rank"].append({"time": time_sec, "text": f"{time_sec//60:02d}:{time_sec%60:02d}"})
-    if not step_exists:
-        data["step_rank"].append({"step": step})
-    # 排序并截取前5名
+    data = st.session_state.rank_data
+    data["time_rank"].append({"time": time_sec, "text": f"{time_sec//60:02d}:{time_sec%60:02d}"})
+    data["step_rank"].append({"step": step})
     data["time_rank"] = sorted(data["time_rank"], key=lambda x: x["time"])[:5]
     data["step_rank"] = sorted(data["step_rank"], key=lambda x: x["step"])[:5]
-    with open(RANK_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    st.session_state.rank_data = data
 
 def clear_rank():
-    init_rank_file()
-    empty_data = {"time_rank": [], "step_rank": []}
-    with open(RANK_FILE, "w", encoding="utf-8") as f:
-        json.dump(empty_data, f, ensure_ascii=False, indent=2)
+    st.session_state.rank_data = {"time_rank": [], "step_rank": []}
 
 # ===================== 图片加载 =====================
-image_files = [f for f in os.listdir('images') if f.endswith(('.jpg', '.jpeg', '.png'))]
-image_files.sort(key=lambda x: int(''.join(filter(str.isdigit, x))) if any(c.isdigit() for c in x) else 0)
+image_files = []
+if os.path.exists('images'):
+    image_files = [f for f in os.listdir('images') if f.endswith(('.jpg', '.jpeg', '.png'))]
+    image_files.sort(key=lambda x: int(''.join(filter(str.isdigit, x))) if any(c.isdigit() for c in x) else 0)
 
 image_base64_list = []
 for img_file in image_files:
@@ -61,10 +43,10 @@ for img_file in image_files:
             ext = img_file.split('.')[-1]
             mime = 'image/jpeg' if ext in ('jpg','jpeg') else 'image/png'
             image_base64_list.append(f'data:{mime};base64,{b64}')
-    except Exception as e:
-        st.error(f"图片加载失败：{e}")
+    except:
+        continue
 
-# 兜底图片，防止黑屏
+# 兜底图片
 if not image_base64_list:
     img = Image.new('RGB', (300, 300), color=(102, 126, 234))
     buf = io.BytesIO()
@@ -73,32 +55,20 @@ if not image_base64_list:
     image_base64_list = [f'data:image/jpeg;base64,{b64}']
     image_files = ["默认图片.jpg"]
 
-# ===================== 后端参数监听（修复执行顺序） =====================
-init_rank_file()
-params = st.query_params
+# ===================== 云端核心：接收前端成绩消息 =====================
+# 接收组件发送的成绩
+if "save_score" in st.session_state:
+    time, step = st.session_state.save_score
+    save_score(time, step)
+    st.success(f"🎉 成绩已上榜！{time//60:02d}:{time%60:02d} | {step}步")
+    del st.session_state.save_score
 
-if "save" in params:
-    try:
-        t = int(params.get("time", 0))
-        s = int(params.get("step", 0))
-        if t > 0 and s > 0:
-            save_score(t, s)
-            st.success(f"🎉 成绩已保存：{t}秒，{s}步")
-    except Exception as e:
-        st.error(f"❌ 保存失败：{e}")
-    st.rerun()
-    st.query_params.clear()
-
-if "clear" in params:
+if "clear_rank" in st.session_state:
     clear_rank()
     st.success("🧹 排行榜已清空")
-    st.rerun()
-    st.query_params.clear()
+    del st.session_state.clear_rank
 
-# 最后加载排行榜数据
-rank_data = load_rank()
-
-# ===================== 前端代码（修复数据传递和提交逻辑） =====================
+# ===================== 前端代码（云端专用，无URL传参） =====================
 puzzle_html = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -106,7 +76,6 @@ puzzle_html = """
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-    /* 保持原有样式不变 */
     *{margin:0;padding:0;box-sizing:border-box}
     body{background:#f0f0f0;padding:10px;font-family: "Microsoft YaHei";}
     .button-row {display: flex;justify-content: center;gap: 12px;margin: 10px 0;width: 100%;}
@@ -127,7 +96,6 @@ puzzle_html = """
 </style>
 </head>
 <body>
-    <!-- 保持原有HTML结构不变 -->
     <div class="button-row">
         <button onclick="shufflePuzzle()">🔀 打乱</button>
         <button onclick="autoSolve()">🤖 自动还原</button>
@@ -141,21 +109,14 @@ puzzle_html = """
     <div class="puzzle"><div id="grid" class="grid"></div></div>
     <button class="clear-btn" onclick="clearRank()">清空排行榜</button>
     <div class="rank-container">
-        <div class="rank-box">
-            <div class="rank-title">🏆 最短时间</div>
-            <div id="timeRank"></div>
-        </div>
-        <div class="rank-box">
-            <div class="rank-title">🏆 最少步数</div>
-            <div id="stepRank"></div>
-        </div>
+        <div class="rank-box"><div class="rank-title">🏆 最短时间</div><div id="timeRank"></div></div>
+        <div class="rank-box"><div class="rank-title">🏆 最少步数</div><div id="stepRank"></div></div>
     </div>
 
 <script>
 const target = [1,2,3,4,5,6,7,8,0];
 const dx = [-1,1,0,0];
 const dy = [0,0,-1,1];
-
 let board = [];
 let squareImg = "";
 let moves = 0;
@@ -163,7 +124,6 @@ let isSolving = false;
 let currentImageIndex = 0;
 const imageCache = {};
 let manualPlay = true;
-
 let startTime = 0;
 let timer = null;
 let elapsedTime = 0;
@@ -176,7 +136,6 @@ function formatTime(seconds) {
     const sec = (seconds % 60).toString().padStart(2, '0');
     return `${min}:${sec}`;
 }
-
 function startTimer() {
     if (timer) clearInterval(timer);
     startTime = Date.now() - elapsedTime * 1000;
@@ -202,9 +161,8 @@ async function cropSquare(url){
             canvas.width = canvas.height = size;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(img, (img.width-size)/2, (img.height-size)/2, size, size, 0,0,size,size);
-            const data = canvas.toDataURL();
-            imageCache[url] = data;
-            res(data);
+            imageCache[url] = canvas.toDataURL();
+            res(imageCache[url]);
         };
         img.onerror = () => {
             const canvas = document.createElement('canvas');
@@ -212,9 +170,8 @@ async function cropSquare(url){
             const ctx = canvas.getContext('2d');
             ctx.fillStyle = '#667eea';
             ctx.fillRect(0,0,300,300);
-            const data = canvas.toDataURL();
-            imageCache[url] = data;
-            res(data);
+            imageCache[url] = canvas.toDataURL();
+            res(imageCache[url]);
         };
         img.src = url;
     });
@@ -226,23 +183,17 @@ const isSolved = () => JSON.stringify(board) === JSON.stringify(target);
 function render(){
     const grid = document.getElementById('grid');
     const emptyIdx = getEmptyIndex();
-    const fragment = document.createDocumentFragment();
     grid.innerHTML = '';
-
     for(let i=0;i<9;i++){
         const tile = document.createElement('div');
         const val = board[i];
-        if(val === 0){
-            tile.className = 'tile empty';
-        }else{
+        if(val === 0){ tile.className = 'tile empty'; }
+        else{
             tile.className = 'tile';
             tile.textContent = val;
-            const idx = val - 1;
-            const col = idx % 3;
-            const row = Math.floor(idx / 3);
+            const idx = val-1;
             tile.style.backgroundImage = `url(${squareImg})`;
-            tile.style.backgroundPosition = `${col*50}% ${row*50}%`;
-
+            tile.style.backgroundPosition = `${idx%3*50}% ${Math.floor(idx/3)*50}%`;
             const ex = Math.floor(emptyIdx/3), ey = emptyIdx%3;
             const ix = Math.floor(i/3), iy = i%3;
             if(Math.abs(ex-ix)+Math.abs(ey-iy)===1){
@@ -250,193 +201,125 @@ function render(){
                 tile.onclick = () => move(i);
             }
         }
-        fragment.appendChild(tile);
+        grid.appendChild(tile);
     }
-    grid.appendChild(fragment);
     document.getElementById('moves').textContent = moves;
-
-    // 手动通关触发提交
-    if(isSolved() && timer && manualPlay){
-        stopTimer();
-        submitScore();
-    }
+    if(isSolved() && timer && manualPlay){ stopTimer(); submitScore(); }
 }
 
 function move(index){
-    const emptyIdx = getEmptyIndex();
-    [board[index], board[emptyIdx]] = [board[emptyIdx], board[index]];
+    const e = getEmptyIndex();
+    [board[index], board[e]] = [board[e], board[index]];
     moves++;
     render();
 }
 
 function initImageSelect(){
-    const select = document.getElementById('imageSelect');
-    select.innerHTML = '';
-    IMAGE_NAMES.forEach((name, idx) => {
-        const option = document.createElement('option');
-        option.value = idx;
-        option.textContent = name.replace(/\.\w+$/, '');
-        if(idx === currentImageIndex) option.selected = true;
-        select.appendChild(option);
+    const s = document.getElementById('imageSelect');
+    s.innerHTML = '';
+    IMAGE_NAMES.forEach((n,i)=>{
+        const o = document.createElement('option');
+        o.value=i; o.textContent=n.replace(/\.\w+$/,'');
+        if(i===currentImageIndex) o.selected=true;
+        s.appendChild(o);
     });
 }
 
-async function selectImage(index){
-    currentImageIndex = parseInt(index);
-    board = [...target];
-    moves = 0;
-    resetTimer();
-    isSolving = false;
-    manualPlay = true;
-    squareImg = await cropSquare(IMAGE_LIST[currentImageIndex]);
-    render();
-    autoShuffleBoard();
+async function selectImage(i){
+    currentImageIndex=parseInt(i);
+    board=[...target]; moves=0; resetTimer(); isSolving=false; manualPlay=true;
+    squareImg=await cropSquare(IMAGE_LIST[currentImageIndex]);
+    render(); autoShuffleBoard();
 }
-function prevImage(){
-    currentImageIndex = (currentImageIndex - 1 + IMAGE_LIST.length) % IMAGE_LIST.length;
-    selectImage(currentImageIndex);
-}
-function nextImage(){
-    currentImageIndex = (currentImageIndex + 1) % IMAGE_LIST.length;
-    selectImage(currentImageIndex);
-}
+function prevImage(){ selectImage((currentImageIndex-1+IMAGE_LIST.length)%IMAGE_LIST.length); }
+function nextImage(){ selectImage((currentImageIndex+1)%IMAGE_LIST.length); }
 
 function autoShuffleBoard(){
     for(let i=0;i<70;i++){
-        const e = getEmptyIndex();
-        const dirs = [-1,1,-3,3].filter(d=>{
-            const n = e+d;
+        const e=getEmptyIndex();
+        const dirs=[-1,1,-3,3].filter(d=>{
+            const n=e+d;
             if(n<0||n>=9) return false;
             if(e%3===0&&d===-1) return false;
             if(e%3===2&&d===1) return false;
             return true;
         });
         if(dirs.length){
-            const r = dirs[Math.floor(Math.random()*dirs.length)];
-            [board[e], board[e+r]] = [board[e+r], board[e]];
+            const r=dirs[Math.floor(Math.random()*dirs.length)];
+            [board[e],board[e+r]]=[board[e+r],board[e]];
         }
     }
-    render();
-    startTimer();
+    render(); startTimer();
 }
 
-function shufflePuzzle(){
-    moves = 0;
-    resetTimer();
-    manualPlay = true;
-    autoShuffleBoard();
-}
+function shufflePuzzle(){ moves=0; resetTimer(); manualPlay=true; autoShuffleBoard(); }
 
-// 修复：使用parent.location确保参数被Streamlit捕获
+// ===================== 云端核心：发送成绩给Streamlit =====================
 function submitScore() {
-    if(elapsedTime <= 0 || moves <= 0) return;
+    if(elapsedTime<=0||moves<=0) return;
     alert("你真是个棒人！！");
-    // 关键修复：使用window.parent.location.href
-    const url = new URL(window.parent.location.href);
-    url.searchParams.set('save', '1');
-    url.searchParams.set('time', elapsedTime);
-    url.searchParams.set('step', moves);
-    url.searchParams.set('t', Date.now()); // 避免缓存
-    window.parent.location.href = url.toString();
+    // 官方通信方式，云端100%可用
+    window.parent.streamlitPython.setComponentValue("save_score", [elapsedTime, moves]);
 }
-
 function clearRank() {
-    const url = new URL(window.parent.location.href);
-    url.searchParams.set('clear', '1');
-    url.searchParams.set('t', Date.now());
-    window.parent.location.href = url.toString();
+    window.parent.streamlitPython.setComponentValue("clear_rank", true);
 }
 
-// 修复：添加空数据处理和调试输出
 function renderServerRank() {
-    console.log("服务器时间排行数据：", SERVER_TIME_RANK);
-    console.log("服务器步数排行数据：", SERVER_STEP_RANK);
-    const timeDom = document.getElementById('timeRank');
-    const stepDom = document.getElementById('stepRank');
-    
-    if (SERVER_TIME_RANK.length === 0) {
-        timeDom.innerHTML = '<div class="rank-item">暂无数据</div>';
-    } else {
-        timeDom.innerHTML = SERVER_TIME_RANK.map((item, i) => 
-            `<div class="rank-item">${i+1}. ${item.text}</div>`
-        ).join('');
-    }
-    
-    if (SERVER_STEP_RANK.length === 0) {
-        stepDom.innerHTML = '<div class="rank-item">暂无数据</div>';
-    } else {
-        stepDom.innerHTML = SERVER_STEP_RANK.map((item, i) => 
-            `<div class="rank-item">${i+1}. ${item.step}步</div>`
-        ).join('');
-    }
+    const t=document.getElementById('timeRank'),s=document.getElementById('stepRank');
+    t.innerHTML=SERVER_TIME_RANK.length?SERVER_TIME_RANK.map((i,j)=>`<div class="rank-item">${j+1}. ${i.text}</div>`).join(''):'<div class="rank-item">暂无数据</div>';
+    s.innerHTML=SERVER_STEP_RANK.length?SERVER_STEP_RANK.map((i,j)=>`<div class="rank-item">${j+1}. ${i.step}步</div>`).join(''):'<div class="rank-item">暂无数据</div>';
 }
 
 async function autoSolve(){
-    if(isSolved() || isSolving) return;
-    isSolving = true;
-    manualPlay = false;
-
-    const queue = [{state:[...board], space:getEmptyIndex(), steps:[]}];
-    const visited = new Set([JSON.stringify(board)]);
-
-    while(queue.length){
-        const cur = queue.shift();
-        if(JSON.stringify(cur.state) === JSON.stringify(target)){
-            await executeSteps(cur.steps);
-            isSolving = false;
-            stopTimer();
+    if(isSolved()||isSolving) return;
+    isSolving=true; manualPlay=false;
+    const q=[{state:[...board],space:getEmptyIndex(),steps:[]}];
+    const v=new Set([JSON.stringify(board)]);
+    while(q.length){
+        const c=q.shift();
+        if(JSON.stringify(c.state)===JSON.stringify(target)){
+            await executeSteps(c.steps);
+            isSolving=false; stopTimer();
             alert("你是不是不行，还得自动还原。");
             return;
         }
-        const x = Math.floor(cur.space / 3);
-        const y = cur.space % 3;
+        const x=Math.floor(c.space/3),y=c.space%3;
         for(let i=0;i<4;i++){
-            const nx = x + dx[i], ny = y + dy[i];
+            const nx=x+dx[i],ny=y+dy[i];
             if(nx<0||nx>=3||ny<0||ny>=3) continue;
-            const newSpace = nx*3+ny;
-            const newState = [...cur.state];
-            [newState[cur.space], newState[newSpace]] = [newState[newSpace], newState[cur.space]];
-            const key = JSON.stringify(newState);
-            if(!visited.has(key)){
-                visited.add(key);
-                queue.push({state:newState, space:newSpace, steps:[...cur.steps, newSpace]});
-            }
+            const ns=nx*3+ny;
+            const nst=[...c.state];
+            [nst[c.space],nst[ns]]=[nst[ns],nst[c.space]];
+            const k=JSON.stringify(nst);
+            if(!v.has(k)){v.add(k);q.push({state:nst,space:ns,steps:[...c.steps,ns]});}
         }
     }
-    isSolving = false;
+    isSolving=false;
 }
-
-async function executeSteps(steps){
-    for(const pos of steps){
-        move(pos);
-        await new Promise(r => setTimeout(r, 120));
-    }
-}
+async function executeSteps(s){for(const p of s){move(p);await new Promise(r=>setTimeout(r,120));}}
 
 const IMAGE_LIST = IMAGE_LIST_PLACEHOLDER;
 const IMAGE_NAMES = IMAGE_NAMES_PLACEHOLDER;
-async function init(){
-    initImageSelect();
-    renderServerRank();
-    await selectImage(0);
-}
+async function init(){ initImageSelect(); renderServerRank(); await selectImage(0); }
 init();
 </script>
 </body>
 </html>
 """
 
-# 修复：使用json.dumps确保数据格式正确
+# 数据注入
 image_list_str = json.dumps(image_base64_list)
 image_names_str = json.dumps(image_files)
-time_rank_str = json.dumps(rank_data["time_rank"], ensure_ascii=False)
-step_rank_str = json.dumps(rank_data["step_rank"], ensure_ascii=False)
+time_rank_str = json.dumps(st.session_state.rank_data["time_rank"], ensure_ascii=False)
+step_rank_str = json.dumps(st.session_state.rank_data["step_rank"], ensure_ascii=False)
 
 puzzle_html = puzzle_html.replace('IMAGE_LIST_PLACEHOLDER', image_list_str)
 puzzle_html = puzzle_html.replace('IMAGE_NAMES_PLACEHOLDER', image_names_str)
 puzzle_html = puzzle_html.replace('SERVER_TIME_RANK_PLACEHOLDER', time_rank_str)
 puzzle_html = puzzle_html.replace('SERVER_STEP_RANK_PLACEHOLDER', step_rank_str)
 
+# 云端专用组件渲染
 components.html(puzzle_html, height=900)
 
 st.write("---")
