@@ -16,6 +16,42 @@ st.write("✅ 点击相邻方块移动 | 自动还原不计入榜单成绩")
 if "rank_data" not in st.session_state:
     st.session_state.rank_data = {"time_rank": [], "step_rank": []}
 
+# ===================== 处理URL参数（成绩提交逻辑） =====================
+params = st.query_params
+
+if "save" in params:
+    try:
+        t = int(params.get("time", 0))
+        s = int(params.get("step", 0))
+        if t > 0 and s > 0:
+            # 保存成绩到排行榜
+            st.session_state.rank_data["time_rank"].append({
+                "time": t,
+                "text": f"{t//60:02d}:{t%60:02d}"
+            })
+            st.session_state.rank_data["step_rank"].append({"step": s})
+            
+            # 排序并保留前5名
+            st.session_state.rank_data["time_rank"] = sorted(
+                st.session_state.rank_data["time_rank"],
+                key=lambda x: x["time"]
+            )[:5]
+            st.session_state.rank_data["step_rank"] = sorted(
+                st.session_state.rank_data["step_rank"],
+                key=lambda x: x["step"]
+            )[:5]
+            
+            st.success(f"🎉 成绩已上榜！{t//60:02d}:{t%60:02d} | {s}步")
+    except Exception as e:
+        st.error(f"❌ 保存失败：{e}")
+    # 清除参数，避免重复提交
+    st.query_params.clear()
+
+if "clear" in params:
+    st.session_state.rank_data = {"time_rank": [], "step_rank": []}
+    st.success("🧹 排行榜已清空")
+    st.query_params.clear()
+
 # ===================== 图片加载 =====================
 image_files = []
 if os.path.exists('images'):
@@ -42,48 +78,7 @@ if not image_base64_list:
     image_base64_list = [f'data:image/jpeg;base64,{b64}']
     image_files = ["默认图片.jpg"]
 
-# ===================== 核心：处理URL参数（先处理，再渲染页面） =====================
-params = st.query_params
-
-# 保存成绩逻辑（必须放在最前面）
-if "save" in params:
-    try:
-        t = int(params.get("time", 0))
-        s = int(params.get("step", 0))
-        if t > 0 and s > 0:
-            # 保存到session_state排行榜
-            st.session_state.rank_data["time_rank"].append({
-                "time": t,
-                "text": f"{t//60:02d}:{t%60:02d}"
-            })
-            st.session_state.rank_data["step_rank"].append({"step": s})
-            
-            # 排序并保留前5名
-            st.session_state.rank_data["time_rank"] = sorted(
-                st.session_state.rank_data["time_rank"],
-                key=lambda x: x["time"]
-            )[:5]
-            st.session_state.rank_data["step_rank"] = sorted(
-                st.session_state.rank_data["step_rank"],
-                key=lambda x: x["step"]
-            )[:5]
-            
-            # 显示绿色提示条
-            st.success(f"🎉 成绩已上榜！{t//60:02d}:{t%60:02d} | {s}步")
-    except Exception as e:
-        st.error(f"❌ 保存失败：{e}")
-    # 清除参数并刷新页面
-    st.query_params.clear()
-    st.rerun()
-
-# 清空排行榜逻辑
-if "clear" in params:
-    st.session_state.rank_data = {"time_rank": [], "step_rank": []}
-    st.success("🧹 排行榜已清空")
-    st.query_params.clear()
-    st.rerun()
-
-# ===================== 前端HTML游戏代码（修复语法问题） =====================
+# ===================== 前端HTML游戏代码（关键：iframe内URL提交，不跨域） =====================
 puzzle_html = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -269,23 +264,25 @@ function autoShuffleBoard(){
 
 function shufflePuzzle(){ moves=0; resetTimer(); manualPlay=true; autoShuffleBoard(); }
 
-// 改用URL传参，彻底删除错误API
+// ===================== 关键修复：iframe内提交URL，不跨域跳转 =====================
 function submitScore() {
     if(elapsedTime<=0||moves<=0) return;
-    alert("你真是个棒人！！");
-    const url = new URL(window.parent.location.href);
+    alert("你真是个棒人！！\n点击确定后，请手动刷新页面查看成绩");
+    // 在iframe内提交URL，不修改parent，避免跨域错误
+    const url = new URL(window.location.href);
     url.searchParams.set('save', '1');
     url.searchParams.set('time', elapsedTime);
     url.searchParams.set('step', moves);
     url.searchParams.set('t', Date.now());
-    window.parent.location.href = url.toString();
+    // 打开新标签页提交参数（不会影响当前游戏，也不会跨域）
+    window.open(url.toString(), '_blank');
 }
 
 function clearRank() {
-    const url = new URL(window.parent.location.href);
+    const url = new URL(window.location.href);
     url.searchParams.set('clear', '1');
     url.searchParams.set('t', Date.now());
-    window.parent.location.href = url.toString();
+    window.open(url.toString(), '_blank');
 }
 
 function renderServerRank() {
@@ -331,20 +328,20 @@ init();
 </html>
 """
 
-# ===================== 数据注入（修复JSON转义问题） =====================
+# ===================== 数据注入 =====================
 image_list_str = json.dumps(image_base64_list)
 image_names_str = json.dumps(image_files)
 time_rank_str = json.dumps(st.session_state.rank_data["time_rank"], ensure_ascii=False)
 step_rank_str = json.dumps(st.session_state.rank_data["step_rank"], ensure_ascii=False)
 
-# 安全替换占位符
 puzzle_html = puzzle_html.replace('IMAGE_LIST_PLACEHOLDER', image_list_str)
 puzzle_html = puzzle_html.replace('IMAGE_NAMES_PLACEHOLDER', image_names_str)
 puzzle_html = puzzle_html.replace('SERVER_TIME_RANK_PLACEHOLDER', time_rank_str)
 puzzle_html = puzzle_html.replace('SERVER_STEP_RANK_PLACEHOLDER', step_rank_str)
 
-# ===================== 渲染游戏（简化调用，兼容所有Streamlit版本） =====================
+# ===================== 渲染游戏（纯components.html，无任何高级API） =====================
 components.html(puzzle_html, height=900)
 
 st.write("---")
 st.write("💡 规则：开局默认打乱 | 自动还原不计成绩 | 手动通关上榜")
+st.write("💡 通关提示后，点击「确定」并刷新页面，成绩会自动同步到排行榜")
