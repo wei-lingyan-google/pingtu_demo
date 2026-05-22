@@ -4,6 +4,8 @@ import os
 import base64
 
 st.title("🧩 钧崽变变变")
+# 1. 新增游戏作者信息
+st.subheader("🎮 游戏作者：魏菱延")
 st.write("✅ 点击空格相邻方块移动 | BFS最短路径自动还原")
 
 # 读取图片 + 修复所有语法错误
@@ -25,9 +27,9 @@ for img_file in image_files:
 # 兼容无图片情况（使用默认图片）
 if not image_base64_list:
     image_base64_list = ["https://picsum.photos/300"]
-    image_files = ["默认图片.jpg"]  # 为默认图片添加名称，避免前端报错
+    image_files = ["默认图片.jpg"]
 
-# 🔥 修复版：增加换图控件 + 移除还原按钮 + 兼容多图片切换
+# 🔥 最终版：作者信息+时长计时+换图+无还原按钮
 puzzle_html = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -37,11 +39,11 @@ puzzle_html = """
 <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{background:#f0f0f0;padding:10px;font-family: "Microsoft YaHei"}
-    .btn-group{display:flex;justify-content:center;gap:10px;margin:10px 0}
+    .btn-group{display:flex;justify-content:center;gap:10px;margin:10px 0;flex-wrap:wrap}
     button{padding:8px 16px;border:none;border-radius:6px;background:#667eea;color:white;cursor:pointer}
     button:hover{background:#5568d3}
     select{padding:6px 10px;border-radius:6px;border:none;min-width:150px;}
-    .info{text-align:center;font-weight:bold;margin:5px 0}
+    .info{text-align:center;font-weight:bold;margin:8px 0;font-size:16px}
     .puzzle{max-width:350px;margin:10px auto}
     .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;background:#333;padding:3px;border-radius:8px;aspect-ratio:1}
     .tile{
@@ -55,35 +57,70 @@ puzzle_html = """
 </style>
 </head>
 <body>
-    <!-- 移除了原有的「还原」按钮 -->
     <div class="btn-group">
         <button onclick="shufflePuzzle()">打乱</button>
         <button onclick="autoSolve()">自动还原</button>
     </div>
 
-    <!-- 新增：换图控件组 -->
+    <!-- 换图控件 -->
     <div class="btn-group">
         <button onclick="prevImage()">上一张</button>
         <select id="imageSelect" onchange="selectImage(this.value)"></select>
         <button onclick="nextImage()">下一张</button>
     </div>
 
-    <div class="info">步数：<span id="moves">0</span></div>
+    <!-- 2. 新增时长显示，和步数合并 -->
+    <div class="info">步数：<span id="moves">0</span> &nbsp;&nbsp; 时长：<span id="time">00:00</span></div>
     <div class="puzzle"><div class="grid" id="grid"></div></div>
 
 <script>
 const N = 3;
-const target = [1,2,3,4,5,6,7,8,0]; // 0=空格（严格对应C++代码）
-const dx = [-1,1,0,0]; // 上下左右 对应C++ dx
+const target = [1,2,3,4,5,6,7,8,0];
+const dx = [-1,1,0,0];
 const dy = [0,0,-1,1];
 
-let board = [];    // 拼图数据
-let squareImg = "";// 裁剪后的正方形图片
+let board = [];
+let squareImg = "";
 let moves = 0;
-let isSolving = false; // 防止重复点击卡死
-let currentImageIndex = 0; // 当前选中的图片索引（新增）
+let isSolving = false;
+let currentImageIndex = 0;
 
-// 居中裁剪正方形（上下裁剪）
+// ------------ 新增计时变量 ------------
+let startTime = 0;    // 开始时间戳
+let timer = null;    // 定时器
+let elapsedTime = 0; // 已用时间(秒)
+
+// 格式化时间 00:00
+function formatTime(seconds) {
+    const min = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const sec = (seconds % 60).toString().padStart(2, '0');
+    return `${min}:${sec}`;
+}
+
+// 开始计时
+function startTimer() {
+    if (timer) clearInterval(timer);
+    startTime = Date.now() - elapsedTime * 1000;
+    timer = setInterval(() => {
+        elapsedTime = Math.floor((Date.now() - startTime) / 1000);
+        document.getElementById("time").textContent = formatTime(elapsedTime);
+    }, 1000);
+}
+
+// 停止计时
+function stopTimer() {
+    clearInterval(timer);
+    timer = null;
+}
+
+// 重置计时
+function resetTimer() {
+    stopTimer();
+    elapsedTime = 0;
+    document.getElementById("time").textContent = formatTime(0);
+}
+
+// 居中裁剪正方形
 function cropSquare(url){
     return new Promise(res=>{
         const img = new Image();
@@ -100,7 +137,7 @@ function cropSquare(url){
     });
 }
 
-// 获取空格位置（值为0）
+// 获取空格位置
 function getEmptyIndex(){
     return board.findIndex(v => v === 0);
 }
@@ -110,7 +147,7 @@ function isSolved(){
     return JSON.stringify(board) === JSON.stringify(target);
 }
 
-// 渲染拼图（核心：保证空格永远显示）
+// 渲染拼图
 function render(){
     const grid = document.getElementById('grid');
     grid.innerHTML = '';
@@ -120,19 +157,17 @@ function render(){
         const tile = document.createElement('div');
         const val = board[i];
 
-        if(val === 0){ // 空格
+        if(val === 0){
             tile.className = 'tile empty';
         }else{
             tile.className = 'tile';
             tile.textContent = val;
-            // 正确分块显示图片
             const idx = val - 1;
             const col = idx % 3;
             const row = Math.floor(idx / 3);
             tile.style.backgroundImage = `url(${squareImg})`;
             tile.style.backgroundPosition = `${col*50}% ${row*50}%`;
 
-            // 判断可移动
             const ex = Math.floor(emptyIdx/3), ey = emptyIdx%3;
             const ix = Math.floor(i/3), iy = i%3;
             if(Math.abs(ex-ix)+Math.abs(ey-iy)===1){
@@ -143,9 +178,14 @@ function render(){
         grid.appendChild(tile);
     }
     document.getElementById('moves').textContent = moves;
+
+    // 完成拼图时停止计时
+    if(isSolved() && timer){
+        stopTimer();
+    }
 }
 
-// 移动方块（安全移动，保证空格不消失）
+// 移动方块
 function move(index){
     const emptyIdx = getEmptyIndex();
     [board[index], board[emptyIdx]] = [board[emptyIdx], board[index]];
@@ -153,7 +193,7 @@ function move(index){
     render();
 }
 
-// 初始化图片选择下拉框（新增）
+// 初始化图片选择框
 function initImageSelect(){
     const select = document.getElementById('imageSelect');
     select.innerHTML = '';
@@ -166,32 +206,32 @@ function initImageSelect(){
     });
 }
 
-// 切换图片：选择指定索引的图片（新增核心函数）
+// 切换图片
 async function selectImage(index){
     currentImageIndex = parseInt(index);
     document.getElementById('imageSelect').value = currentImageIndex;
-    // 重置拼图状态
+    // 切换图片重置步数和计时
     board = [...target];
     moves = 0;
+    resetTimer();
     isSolving = false;
-    // 加载并裁剪新图片
     squareImg = await cropSquare(IMAGE_LIST[currentImageIndex]);
     render();
 }
 
-// 上一张图片（新增）
+// 上一张
 function prevImage(){
     currentImageIndex = (currentImageIndex - 1 + IMAGE_LIST.length) % IMAGE_LIST.length;
     selectImage(currentImageIndex);
 }
 
-// 下一张图片（新增）
+// 下一张
 function nextImage(){
     currentImageIndex = (currentImageIndex + 1) % IMAGE_LIST.length;
     selectImage(currentImageIndex);
 }
 
-// 打乱拼图（兼容换图功能）
+// 打乱拼图（开始计时）
 function shufflePuzzle(){
     selectImage(currentImageIndex).then(()=>{
         for(let i=0;i<100;i++){
@@ -200,7 +240,7 @@ function shufflePuzzle(){
                 const n = e+d;
                 if(n<0||n>=9) return false;
                 if(e%3===0&&d===-1) return false;
-                if(e%3===2&&d===1) return false;
+                if(e%2===2&&d===1) return false;
                 return true;
             });
             if(dirs.length){
@@ -209,15 +249,15 @@ function shufflePuzzle(){
             }
         }
         render();
+        startTimer(); // 打乱后开始计时
     });
 }
 
-// ====================== 修复版BFS自动还原（严格对齐C++，无卡死）======================
+// BFS自动还原
 async function autoSolve(){
     if(isSolved() || isSolving) return;
     isSolving = true;
 
-    // BFS节点
     class Node {
         constructor(state, space, steps){
             this.state = [...state];
@@ -232,17 +272,16 @@ async function autoSolve(){
     while(queue.length > 0){
         const cur = queue.shift();
 
-        // 找到答案，执行步骤
         if(JSON.stringify(cur.state) === JSON.stringify(target)){
             await executeSteps(cur.steps);
             isSolving = false;
+            stopTimer(); // 自动还原完成停止计时
             return;
         }
 
         const x = Math.floor(cur.space / 3);
         const y = cur.space % 3;
 
-        // 四个方向（严格对应C++）
         for(let i=0;i<4;i++){
             const nx = x + dx[i];
             const ny = y + dy[i];
@@ -262,7 +301,7 @@ async function autoSolve(){
     isSolving = false;
 }
 
-// 安全执行移动步骤（永不卡死、空格永不消失）
+// 执行步骤
 async function executeSteps(steps){
     for(const pos of steps){
         move(pos);
@@ -270,7 +309,7 @@ async function executeSteps(steps){
     }
 }
 
-// 初始化（替换原resetPuzzle，兼容换图）
+// 初始化
 const IMAGE_LIST = IMAGE_LIST_PLACEHOLDER;
 const IMAGE_NAMES = IMAGE_NAMES_PLACEHOLDER;
 async function init(){
@@ -283,14 +322,13 @@ init();
 </html>
 """
 
-# 注入图片列表和文件名（支持前端显示图片名称）
+# 注入数据
 image_list_str = '["' + '", "'.join(image_base64_list) + '"]'
 image_names_str = '["' + '", "'.join(image_files) + '"]'
 puzzle_html = puzzle_html.replace('IMAGE_LIST_PLACEHOLDER', image_list_str)
 puzzle_html = puzzle_html.replace('IMAGE_NAMES_PLACEHOLDER', image_names_str)
 
-# 增加高度以容纳换图控件
-components.html(puzzle_html, height=700)
+components.html(puzzle_html, height=720)
 
 st.write("---")
-st.write("💡 规则：还原=正方形裁剪+9格分块+编号1-8；自动还原采用BFS最短路径")
+st.write("💡 规则：点击与空格相邻的方块移动，将拼图还原为完整图片即为胜利！")
