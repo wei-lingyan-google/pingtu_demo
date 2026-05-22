@@ -245,6 +245,7 @@ puzzle_html = """
             const grid = document.getElementById('puzzleGrid');
             const gridItems = grid.children;
             
+            let emptyItem = null;
             let emptyPos = null;
             for (let i = 0; i < gridItems.length; i++) {
                 const item = gridItems[i];
@@ -252,19 +253,28 @@ puzzle_html = """
                     const ir = Math.floor(i / puzzleSize);
                     const ic = i % puzzleSize;
                     if ((Math.abs(ir - row) === 1 && ic === col) || (Math.abs(ic - col) === 1 && ir === row)) {
+                        emptyItem = item;
                         emptyPos = { row: ir, col: ic, index: i };
                         break;
                     }
                 }
             }
             
-            if (emptyPos) {
+            if (emptyPos && emptyItem) {
                 const tileIndex = row * puzzleSize + col;
                 tile.dataset.currentRow = emptyPos.row;
                 tile.dataset.currentCol = emptyPos.col;
                 
-                grid.removeChild(tile);
-                grid.insertBefore(tile, grid.children[emptyPos.index]);
+                const tileRef = tile;
+                const emptyRef = emptyItem;
+                const tileNextSibling = tileRef.nextSibling;
+                
+                grid.insertBefore(emptyRef, tileRef);
+                if (tileNextSibling) {
+                    grid.insertBefore(tileRef, tileNextSibling);
+                } else {
+                    grid.appendChild(tileRef);
+                }
                 
                 moves++;
                 document.getElementById('moves').textContent = moves;
