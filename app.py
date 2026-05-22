@@ -321,7 +321,7 @@ puzzle_html = """
             initPuzzle();
         }
         
-        function resetPuzzle() {
+        async function resetPuzzle() {
             stopTimer();
             moves = 0;
             timer = 0;
@@ -329,6 +329,7 @@ puzzle_html = """
             document.getElementById('moves').textContent = '0';
             document.getElementById('timer').textContent = '00:00';
             
+            currentCroppedUrl = await loadAndCropImage(images[currentImageIndex]);
             resetToComplete();
             renderGrid();
         }
