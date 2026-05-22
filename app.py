@@ -3,6 +3,9 @@ import streamlit.components.v1 as components
 import os
 import base64
 import json
+# 修复：原代码缺失的导入，运行必报错
+from PIL import Image
+import io
 
 # 页面基础配置
 st.set_page_config(page_title="钧崽变变变", page_icon="🧩")
@@ -85,7 +88,7 @@ if "clear" in params:
     st.query_params.clear()
     st.rerun()
 
-# ===================== 前端代码（按钮严格2行布局） =====================
+# ===================== 前端代码（按钮严格2行布局 + 优化提示） =====================
 puzzle_html = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -310,6 +313,7 @@ function render(){
     grid.appendChild(fragment);
     document.getElementById('moves').textContent = moves;
 
+    // 仅手动通关触发提示+提交成绩
     if(isSolved() && timer && manualPlay){
         stopTimer();
         submitScore();
@@ -382,8 +386,10 @@ function shufflePuzzle(){
     autoShuffleBoard();
 }
 
+// 🔥 优化：手动通关提示 + 提交成绩
 function submitScore() {
     if(elapsedTime <= 0 || moves <= 0) return;
+    alert("你真是个棒人！！");
     window.location.search = `save=1&time=${elapsedTime}&step=${moves}`;
 }
 
@@ -402,7 +408,7 @@ function renderServerRank() {
     ).join('');
 }
 
-// 自动还原不计分
+// 🔥 优化：自动还原提示 + 不计成绩
 async function autoSolve(){
     if(isSolved() || isSolving) return;
     isSolving = true;
@@ -417,6 +423,8 @@ async function autoSolve(){
             await executeSteps(cur.steps);
             isSolving = false;
             stopTimer();
+            // 自动还原完成提示
+            alert("你是不是不行，还得自动还原。");
             return;
         }
         const x = Math.floor(cur.space / 3);
