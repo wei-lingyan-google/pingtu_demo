@@ -9,7 +9,8 @@ st.write("✅ 点击空格相邻的方块移动，将图片恢复完整！")
 
 # 获取图片列表并转换为 base64
 image_files = [f for f in os.listdir('images') if f.endswith(('.jpg', '.jpeg', '.png'))]
-image_files.sort()
+# 按文件名中的数字排序
+image_files.sort(key=lambda x: int(''.join(filter(str.isdigit, x))) if any(c.isdigit() for c in x) else 0)
 
 # 将图片转换为 base64
 image_base64_list = []
@@ -383,6 +384,7 @@ puzzle_html = puzzle_html.replace('IMAGE_LIST_PLACEHOLDER', image_list_str)
 
 # 显示图片列表供确认
 st.write(f"📷 已加载 {len(image_base64_list)} 张图片")
+st.write(f"📁 图片列表: {', '.join(image_files)}")
 
 # 嵌入拼图游戏
 components.html(puzzle_html, height=700)
