@@ -4,12 +4,11 @@ import streamlit.components.v1 as components
 import os
 import base64
 
-st.title("🧩 拼图游戏")
+st.title("🧩 钧崽变变变")
 st.write("✅ 点击空格相邻的方块移动，将图片恢复完整！")
 
 # 获取图片列表并转换为 base64
 image_files = [f for f in os.listdir('images') if f.endswith(('.jpg', '.jpeg', '.png'))]
-# 按文件名中的数字排序
 image_files.sort(key=lambda x: int(''.join(filter(str.isdigit, x))) if any(c.isdigit() for c in x) else 0)
 
 # 将图片转换为 base64
@@ -21,18 +20,14 @@ for img_file in image_files:
             img_data = f.read()
             img_base64 = base64.b64encode(img_data).decode('utf-8')
             ext = img_file.split('.')[-1].lower()
-            if ext == 'jpg' or ext == 'jpeg':
-                image_base64_list.append(f'data:image/jpeg;base64,{img_base64}')
-            else:
-                image_base64_list.append(f'data:image/png;base64,{img_base64}')
+            mime = 'image/jpeg' if ext in ['jpg', 'jpeg'] else 'image/png'
+            image_base64_list.append(f'data:{mime};base64,{img_base64}')
     except Exception as e:
         st.error(f"无法加载图片 {img_file}: {e}")
 
-# 如果没有图片，使用默认图片
+# 默认图片
 if not image_base64_list:
-    image_base64_list = [
-        'https://neeko-copilot.bytedance.net/api/text_to_image?prompt=cute%20cat%20portrait%20adorable&image_size=square'
-    ]
+    image_base64_list = ['https://picsum.photos/300/300']
 
 # 拼图游戏 HTML 代码
 puzzle_html = """
@@ -50,10 +45,25 @@ puzzle_html = """
         .stats { text-align: center; margin-bottom: 10px; font-weight: bold; }
         .puzzle-container { background: white; border-radius: 10px; padding: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 350px; margin: 0 auto; }
         .puzzle-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; aspect-ratio: 1; background: #333; border-radius: 6px; padding: 3px; }
-        .tile { background: #4ECDC4; background-size: 300% 300%; border-radius: 4px; transition: all 0.15s ease; display: flex; align-items: center; justify-content: center; }
-        .tile.empty { background: #333 !important; cursor: default; }
+        .tile { 
+            background: #4ECDC4; 
+            background-size: 300% 300%; 
+            border-radius: 4px; 
+            transition: all 0.15s ease; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center;
+            font-size: 26px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 0 0 5px rgba(0,0,0,0.8);
+        }
+        .tile.empty { 
+            background: #333 !important; 
+            cursor: default;
+            color: transparent;
+        }
         .tile.has-image { cursor: pointer; }
-        .tile.has-image:hover:not(.movable) { opacity: 0.7; }
         .tile.movable { cursor: pointer; box-shadow: 0 0 10px rgba(78, 205, 196, 0.8); }
         .tile.movable:hover { transform: scale(1.02); }
         .win-popup { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 25px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); text-align: center; z-index: 1000; }
@@ -61,17 +71,15 @@ puzzle_html = """
         .overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999; }
         .overlay.show { display: block; }
         .win-popup button { margin-top: 15px; padding: 10px 25px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; }
-        .leaderboard { margin-top: 20px; padding: 15px; background: white; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 350px; margin-left: auto; margin-right: auto; }
+        .leaderboard { margin-top: 20px; padding: 15px; background: white; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 350px; margin: 20px auto; }
         .leaderboard h3 { text-align: center; margin-bottom: 10px; color: #333; }
         .leaderboard table { width: 100%; border-collapse: collapse; }
         .leaderboard th, .leaderboard td { padding: 8px; text-align: center; border-bottom: 1px solid #eee; }
-        .leaderboard th { background: #f8f9fa; }
-        .leaderboard tr:last-child td { border-bottom: none; }
     </style>
 </head>
 <body>
     <div class="header">
-        <button onclick="changeImage()">换图</button>
+        <button onclick="autoSolve()">自动还原</button>
         <button onclick="newGame()">新游戏</button>
         <button onclick="resetPuzzle()">还原</button>
     </div>
@@ -86,9 +94,7 @@ puzzle_html = """
     <div class="leaderboard">
         <h3>🏆 排行榜</h3>
         <table>
-            <thead>
-                <tr><th>排名</th><th>用时</th><th>步数</th></tr>
-            </thead>
+            <thead><tr><th>排名</th><th>用时</th><th>步数</th></tr></thead>
             <tbody id="leaderboardBody"></tbody>
         </table>
     </div>
@@ -102,293 +108,220 @@ puzzle_html = """
     </div>
 
     <script>
-        const puzzleSize = 3;
+        const N = 3;
+        const N2 = 9;
+        const dx = [0, 0, -1, 1];
+        const dy = [-1, 1, 0, 0];
+        const pth = ['u', 'd', 'l', 'r'];
+        
         let currentImageIndex = 0;
         let currentCroppedUrl = '';
         let moves = 0;
         let timer = 0;
         let timerInterval = null;
         let isPlaying = false;
+        let isAutoSolving = false;
         
         const images = IMAGE_LIST_PLACEHOLDER;
-        let tilePositions = [];
-        let emptyIndex = puzzleSize * puzzleSize - 1;
-        
+        let tiles = [];
+        // ✅ 核心修复：空格【永久固定在右下角（索引8）】，绝不改变！
+        const SPACE_INDEX = 8;
+
+        // 加载裁剪图片
         function loadAndCropImage(imageUrl) {
-            return new Promise(function(resolve, reject) {
+            return new Promise((resolve) => {
                 const img = new Image();
-                img.onload = function() {
-                    const width = img.width;
-                    const height = img.height;
-                    let cropWidth = width;
-                    let cropHeight = width;
-                    let offsetX = 0;
-                    let offsetY = 0;
-                    
-                    if (height > width) {
-                        offsetY = (height - width) / 2;
-                        cropHeight = width;
-                    } else if (width > height) {
-                        cropWidth = height;
-                        offsetX = (width - height) / 2;
-                    }
-                    
+                img.onload = () => {
+                    const size = Math.min(img.width, img.height);
                     const canvas = document.createElement('canvas');
-                    canvas.width = cropWidth;
-                    canvas.height = cropHeight;
+                    canvas.width = canvas.height = size;
                     const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, offsetX, offsetY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
-                    resolve(canvas.toDataURL('image/jpeg', 0.95));
+                    ctx.drawImage(img, (img.width-size)/2, (img.height-size)/2, size, size, 0, 0, size, size);
+                    resolve(canvas.toDataURL('image/jpeg'));
                 };
-                img.onerror = function() {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = 300;
-                    canvas.height = 300;
-                    const ctx = canvas.getContext('2d');
-                    ctx.fillStyle = '#4ECDC4';
-                    ctx.fillRect(0, 0, 300, 300);
-                    ctx.fillStyle = 'white';
-                    ctx.font = '18px Arial';
-                    ctx.textAlign = 'center';
-                    ctx.fillText('图片加载失败', 150, 150);
-                    resolve(canvas.toDataURL('image/png'));
-                };
+                img.onerror = () => resolve('https://picsum.photos/300/300');
                 img.src = imageUrl;
             });
         }
-        
-        function shuffleArray(array) {
-            for (let i = array.length - 1; i > 0; i--) {
+
+        // ✅ 核心：初始化正确拼图（1-8顺序，右下角空格）
+        function initCorrectTiles() {
+            tiles = [0,1,2,3,4,5,6,7,8];
+        }
+
+        // ✅ 核心：只打乱前8块，空格永久固定在最后一位（右下角）
+        function initShuffledTiles() {
+            tiles = [0,1,2,3,4,5,6,7];
+            // 打乱数组（仅前8块）
+            for (let i = tiles.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
-                [array[i], array[j]] = [array[j], array[i]];
+                [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
             }
+            // 最后一位强制为空格（8），绝不修改！
+            tiles.push(8);
         }
-        
-        function isSolvable(positions) {
-            let inversions = 0;
-            for (let i = 0; i < positions.length; i++) {
-                if (positions[i] === -1) continue;
-                for (let j = i + 1; j < positions.length; j++) {
-                    if (positions[j] === -1) continue;
-                    if (positions[i] > positions[j]) inversions++;
-                }
+
+        // 判断是否完成拼图
+        function isTarget() {
+            for (let i = 0; i < N2; i++) {
+                if (tiles[i] !== i) return false;
             }
-            return inversions % 2 === 0;
+            return true;
         }
-        
-        function initTilePositions() {
-            const totalTiles = puzzleSize * puzzleSize;
-            tilePositions = [];
-            for (let i = 0; i < totalTiles - 1; i++) {
-                tilePositions.push(i);
-            }
-            tilePositions.push(-1);
-            
-            shuffleArray(tilePositions);
-            while (!isSolvable(tilePositions)) {
-                shuffleArray(tilePositions);
-            }
-            
-            emptyIndex = tilePositions.indexOf(-1);
+
+        // 判断方块是否可移动
+        function isMovable(index) {
+            const sx = Math.floor(SPACE_INDEX / N);
+            const sy = SPACE_INDEX % N;
+            const tx = Math.floor(index / N);
+            const ty = index % N;
+            return Math.abs(sx - tx) + Math.abs(sy - ty) === 1;
         }
-        
-        function resetToComplete() {
-            const totalTiles = puzzleSize * puzzleSize;
-            tilePositions = [];
-            for (let i = 0; i < totalTiles - 1; i++) {
-                tilePositions.push(i);
-            }
-            tilePositions.push(-1);
-            emptyIndex = totalTiles - 1;
-        }
-        
-        function isMovable(gridIndex) {
-            const row = Math.floor(gridIndex / puzzleSize);
-            const col = gridIndex % puzzleSize;
-            const emptyRow = Math.floor(emptyIndex / puzzleSize);
-            const emptyCol = emptyIndex % puzzleSize;
-            
-            const rowDiff = Math.abs(row - emptyRow);
-            const colDiff = Math.abs(col - emptyCol);
-            
-            return (rowDiff === 1 && colDiff === 0) || (rowDiff === 0 && colDiff === 1);
-        }
-        
+
+        // 渲染拼图网格
         function renderGrid() {
             const grid = document.getElementById('puzzleGrid');
             grid.innerHTML = '';
-            
-            for (let i = 0; i < tilePositions.length; i++) {
-                const tileValue = tilePositions[i];
+            for (let i = 0; i < N2; i++) {
+                const val = tiles[i];
                 const tile = document.createElement('div');
                 
-                if (tileValue === -1) {
+                if (i === SPACE_INDEX) {
                     tile.className = 'tile empty';
                 } else {
                     tile.className = 'tile has-image';
-                    if (isMovable(i)) {
-                        tile.classList.add('movable');
-                    }
+                    tile.textContent = val + 1; // 显示1-8
+                    if (isMovable(i)) tile.classList.add('movable');
                     
-                    const bgX = (tileValue % puzzleSize) * 100;
-                    const bgY = Math.floor(tileValue / puzzleSize) * 100;
-                    tile.style.backgroundImage = 'url(' + currentCroppedUrl + ')';
-                    tile.style.backgroundPosition = bgX + '% ' + bgY + '%';
-                    
-                    tile.addEventListener('click', function() { onTileClick(i); });
+                    const col = val % N;
+                    const row = Math.floor(val / N);
+                    tile.style.backgroundImage = `url(${currentCroppedUrl})`;
+                    tile.style.backgroundPosition = `${col * 100}% ${row * 100}%`;
+                    tile.onclick = () => onTileClick(i);
                 }
-                
                 grid.appendChild(tile);
             }
         }
-        
-        async function initPuzzle() {
-            stopTimer();
-            moves = 0;
-            timer = 0;
-            isPlaying = false;
-            document.getElementById('moves').textContent = '0';
-            document.getElementById('timer').textContent = '00:00';
+
+        // 点击方块移动
+        function onTileClick(index) {
+            if (!isMovable(index) || isAutoSolving) return;
+            if (!isPlaying) { startTimer(); isPlaying = true; }
             
-            currentCroppedUrl = await loadAndCropImage(images[currentImageIndex]);
-            initTilePositions();
-            renderGrid();
-            loadLeaderboard();
-        }
-        
-        function onTileClick(gridIndex) {
-            if (tilePositions[gridIndex] === -1) return;
-            if (!isMovable(gridIndex)) return;
-            
-            if (!isPlaying) {
-                startTimer();
-                isPlaying = true;
-            }
-            
-            tilePositions[emptyIndex] = tilePositions[gridIndex];
-            tilePositions[gridIndex] = -1;
-            emptyIndex = gridIndex;
-            
+            // 交换点击的方块和空格
+            [tiles[index], tiles[SPACE_INDEX]] = [tiles[SPACE_INDEX], tiles[index]];
             moves++;
             document.getElementById('moves').textContent = moves;
             
             renderGrid();
+            if (isTarget()) { stopTimer(); saveScore(); showWinPopup(); }
+        }
+
+        // 自动解谜
+        async function autoSolve() {
+            if (isAutoSolving) return;
+            isAutoSolving = true;
+            stopTimer();
             
-            if (checkWin()) {
-                stopTimer();
-                saveScore();
-                showWinPopup();
+            // 一步一步还原到正确顺序
+            const target = [0,1,2,3,4,5,6,7,8];
+            while (!isTarget()) {
+                for (let i = 0; i < N2-1; i++) {
+                    if (tiles[i] !== target[i] && isMovable(i)) {
+                        [tiles[i], tiles[SPACE_INDEX]] = [tiles[SPACE_INDEX], tiles[i]];
+                        moves++;
+                        document.getElementById('moves').textContent = moves;
+                        renderGrid();
+                        await new Promise(r => setTimeout(r, 200));
+                        break;
+                    }
+                }
             }
+            
+            isAutoSolving = false;
+            saveScore();
+            showWinPopup();
         }
-        
-        function checkWin() {
-            for (let i = 0; i < tilePositions.length - 1; i++) {
-                if (tilePositions[i] !== i) return false;
-            }
-            return tilePositions[tilePositions.length - 1] === -1;
-        }
-        
+
+        // 计时器
         function startTimer() {
-            timerInterval = setInterval(function() {
+            timerInterval = setInterval(() => {
                 timer++;
-                const minutes = Math.floor(timer / 60);
-                const seconds = timer % 60;
-                document.getElementById('timer').textContent = minutes.toString().padStart(2, '0') + ':' + seconds.toString().padStart(2, '0');
+                const m = Math.floor(timer/60).toString().padStart(2,'0');
+                const s = (timer%60).toString().padStart(2,'0');
+                document.getElementById('timer').textContent = `${m}:${s}`;
             }, 1000);
         }
-        
-        function stopTimer() {
-            if (timerInterval) {
-                clearInterval(timerInterval);
-                timerInterval = null;
-            }
+
+        function stopTimer() { clearInterval(timerInterval); }
+
+        // 游戏控制
+        function resetGameStats() {
+            stopTimer();
+            moves = timer = 0;
+            isPlaying = false;
+            document.getElementById('moves').textContent = '0';
+            document.getElementById('timer').textContent = '00:00';
         }
-        
+
+        async function initPuzzle() {
+            currentCroppedUrl = await loadAndCropImage(images[currentImageIndex]);
+            initShuffledTiles();
+            renderGrid();
+            loadLeaderboard();
+        }
+
+        function newGame() { initShuffledTiles(); renderGrid(); resetGameStats(); }
+        function resetPuzzle() { initCorrectTiles(); renderGrid(); resetGameStats(); }
+
+        // 弹窗与排行榜
         function showWinPopup() {
-            document.getElementById('finalTime').textContent = Math.floor(timer / 60).toString().padStart(2, '0') + ':' + (timer % 60).toString().padStart(2, '0');
+            const m = Math.floor(timer/60).toString().padStart(2,'0');
+            const s = (timer%60).toString().padStart(2,'0');
+            document.getElementById('finalTime').textContent = `${m}:${s}`;
             document.getElementById('finalMoves').textContent = moves;
             document.getElementById('overlay').classList.add('show');
             document.getElementById('winPopup').classList.add('show');
         }
-        
+
         function closeWinPopup() {
             document.getElementById('overlay').classList.remove('show');
             document.getElementById('winPopup').classList.remove('show');
             newGame();
         }
-        
-        function newGame() {
-            initPuzzle();
-        }
-        
-        async function resetPuzzle() {
-            stopTimer();
-            moves = 0;
-            timer = 0;
-            isPlaying = false;
-            document.getElementById('moves').textContent = '0';
-            document.getElementById('timer').textContent = '00:00';
-            
-            currentCroppedUrl = await loadAndCropImage(images[currentImageIndex]);
-            resetToComplete();
-            renderGrid();
-        }
-        
-        function changeImage() {
-            currentImageIndex = (currentImageIndex + 1) % images.length;
-            initPuzzle();
-        }
-        
+
         function saveScore() {
-            const scores = JSON.parse(localStorage.getItem('puzzleScores') || '[]');
-            scores.push({ time: timer, moves: moves, date: new Date().toISOString() });
-            scores.sort(function(a, b) {
-                if (a.time !== b.time) return a.time - b.time;
-                return a.moves - b.moves;
-            });
-            localStorage.setItem('puzzleScores', JSON.stringify(scores.slice(0, 10)));
+            let scores = JSON.parse(localStorage.getItem('puzzleScores')||'[]');
+            scores.push({time:timer, moves:moves});
+            scores.sort((a,b)=>a.time-b.time||a.moves-b.moves);
+            localStorage.setItem('puzzleScores', JSON.stringify(scores.slice(0,10)));
             loadLeaderboard();
         }
-        
+
         function loadLeaderboard() {
-            const scores = JSON.parse(localStorage.getItem('puzzleScores') || '[]');
+            const scores = JSON.parse(localStorage.getItem('puzzleScores')||'[]');
             const tbody = document.getElementById('leaderboardBody');
-            tbody.innerHTML = '';
-            
-            if (scores.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="3" style="color: #999;">暂无记录</td></tr>';
-                return;
-            }
-            
-            scores.forEach(function(score, index) {
-                const tr = document.createElement('tr');
-                const rank = index + 1;
-                const time = Math.floor(score.time / 60).toString().padStart(2, '0') + ':' + (score.time % 60).toString().padStart(2, '0');
-                let rankIcon = rank;
-                if (rank === 1) rankIcon = '🥇';
-                else if (rank === 2) rankIcon = '🥈';
-                else if (rank === 3) rankIcon = '🥉';
-                tr.innerHTML = '<td>' + rankIcon + '</td><td>' + time + '</td><td>' + score.moves + '</td>';
-                tbody.appendChild(tr);
-            });
+            tbody.innerHTML = scores.length ? scores.map((s,i)=>{
+                const t = `${Math.floor(s.time/60).toString().padStart(2,'0')}:${(s.time%60).toString().padStart(2,'0')}`;
+                const r = i+1;
+                const icon = r===1?'🥇':r===2?'🥈':r===3?'🥉':r;
+                return `<tr><td>${icon}</td><td>${t}</td><td>${s.moves}</td></tr>`;
+            }).join('') : '<tr><td colspan="3">暂无记录</td></tr>';
         }
-        
+
+        // 启动游戏
         initPuzzle();
     </script>
 </body>
 </html>
 """
 
-# 替换图片列表占位符
+# 替换图片列表
 image_list_str = '["' + '", "'.join(image_base64_list) + '"]'
 puzzle_html = puzzle_html.replace('IMAGE_LIST_PLACEHOLDER', image_list_str)
 
-# 显示图片列表供确认
 st.write(f"📷 已加载 {len(image_base64_list)} 张图片")
-st.write(f"📁 图片列表: {', '.join(image_files)}")
-
-# 嵌入拼图游戏
-components.html(puzzle_html, height=700)
+components.html(puzzle_html, height=750)
 
 st.write("---")
 st.write("💡 **游戏说明**：点击空格相邻的方块移动，将图片恢复完整！")
