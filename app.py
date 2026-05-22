@@ -12,13 +12,6 @@ st.title("🧩 钧崽变变变")
 st.subheader("🎮 游戏作者：魏菱延")
 st.write("✅ 点击相邻方块移动 | 自动还原不计入榜单成绩")
 
-# ===================== 声明自定义组件（关键：解决跨域通信） =====================
-# 用declare_component声明组件，使iframe内可使用Streamlit通信API
-puzzle_component = components.declare_component(
-    "puzzle_game",
-    path="."  # 本地开发用，云端部署可省略
-)
-
 # ===================== 排行榜数据（云端用session_state） =====================
 if "rank_data" not in st.session_state:
     st.session_state.rank_data = {"time_rank": [], "step_rank": []}
@@ -49,7 +42,48 @@ if not image_base64_list:
     image_base64_list = [f'data:image/jpeg;base64,{b64}']
     image_files = ["默认图片.jpg"]
 
-# ===================== 前端HTML游戏代码（修复通信方式） =====================
+# ===================== 核心：处理URL参数（先处理，再渲染页面） =====================
+params = st.query_params
+
+# 保存成绩逻辑（必须放在最前面）
+if "save" in params:
+    try:
+        t = int(params.get("time", 0))
+        s = int(params.get("step", 0))
+        if t > 0 and s > 0:
+            # 保存到session_state排行榜
+            st.session_state.rank_data["time_rank"].append({
+                "time": t,
+                "text": f"{t//60:02d}:{t%60:02d}"
+            })
+            st.session_state.rank_data["step_rank"].append({"step": s})
+            
+            # 排序并保留前5名
+            st.session_state.rank_data["time_rank"] = sorted(
+                st.session_state.rank_data["time_rank"],
+                key=lambda x: x["time"]
+            )[:5]
+            st.session_state.rank_data["step_rank"] = sorted(
+                st.session_state.rank_data["step_rank"],
+                key=lambda x: x["step"]
+            )[:5]
+            
+            # 显示绿色提示条
+            st.success(f"🎉 成绩已上榜！{t//60:02d}:{t%60:02d} | {s}步")
+    except Exception as e:
+        st.error(f"❌ 保存失败：{e}")
+    # 清除参数并刷新页面
+    st.query_params.clear()
+    st.rerun()
+
+# 清空排行榜逻辑
+if "clear" in params:
+    st.session_state.rank_data = {"time_rank": [], "step_rank": []}
+    st.success("🧹 排行榜已清空")
+    st.query_params.clear()
+    st.rerun()
+
+# ===================== 前端HTML游戏代码（修复语法问题） =====================
 puzzle_html = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -235,20 +269,23 @@ function autoShuffleBoard(){
 
 function shufflePuzzle(){ moves=0; resetTimer(); manualPlay=true; autoShuffleBoard(); }
 
-// ===================== 关键修复：用Streamlit API发送数据，不跳URL =====================
+// 改用URL传参，彻底删除错误API
 function submitScore() {
     if(elapsedTime<=0||moves<=0) return;
     alert("你真是个棒人！！");
-    // 直接通过Streamlit组件API发送成绩，无跨域问题
-    Streamlit.setComponentValue({
-        type: "SAVE_SCORE",
-        time: elapsedTime,
-        step: moves
-    });
+    const url = new URL(window.parent.location.href);
+    url.searchParams.set('save', '1');
+    url.searchParams.set('time', elapsedTime);
+    url.searchParams.set('step', moves);
+    url.searchParams.set('t', Date.now());
+    window.parent.location.href = url.toString();
 }
 
 function clearRank() {
-    Streamlit.setComponentValue({ type: "CLEAR_RANK" });
+    const url = new URL(window.parent.location.href);
+    url.searchParams.set('clear', '1');
+    url.searchParams.set('t', Date.now());
+    window.parent.location.href = url.toString();
 }
 
 function renderServerRank() {
@@ -294,47 +331,20 @@ init();
 </html>
 """
 
-# ===================== 数据注入 =====================
+# ===================== 数据注入（修复JSON转义问题） =====================
 image_list_str = json.dumps(image_base64_list)
 image_names_str = json.dumps(image_files)
 time_rank_str = json.dumps(st.session_state.rank_data["time_rank"], ensure_ascii=False)
 step_rank_str = json.dumps(st.session_state.rank_data["step_rank"], ensure_ascii=False)
 
+# 安全替换占位符
 puzzle_html = puzzle_html.replace('IMAGE_LIST_PLACEHOLDER', image_list_str)
 puzzle_html = puzzle_html.replace('IMAGE_NAMES_PLACEHOLDER', image_names_str)
 puzzle_html = puzzle_html.replace('SERVER_TIME_RANK_PLACEHOLDER', time_rank_str)
 puzzle_html = puzzle_html.replace('SERVER_STEP_RANK_PLACEHOLDER', step_rank_str)
 
-# ===================== 调用自定义组件，接收数据 =====================
-result = puzzle_component(html=puzzle_html, height=900)
-
-# 处理组件返回的数据
-if result:
-    if result.get("type") == "SAVE_SCORE":
-        time_sec = result.get("time", 0)
-        step = result.get("step", 0)
-        if time_sec > 0 and step > 0:
-            # 保存成绩到排行榜
-            st.session_state.rank_data["time_rank"].append({
-                "time": time_sec,
-                "text": f"{time_sec//60:02d}:{time_sec%60:02d}"
-            })
-            st.session_state.rank_data["step_rank"].append({"step": step})
-            # 排序并保留前5名
-            st.session_state.rank_data["time_rank"] = sorted(
-                st.session_state.rank_data["time_rank"],
-                key=lambda x: x["time"]
-            )[:5]
-            st.session_state.rank_data["step_rank"] = sorted(
-                st.session_state.rank_data["step_rank"],
-                key=lambda x: x["step"]
-            )[:5]
-            st.success(f"🎉 成绩已上榜！{time_sec//60:02d}:{time_sec%60:02d} | {step}步")
-            st.rerun()
-    elif result.get("type") == "CLEAR_RANK":
-        st.session_state.rank_data = {"time_rank": [], "step_rank": []}
-        st.success("🧹 排行榜已清空")
-        st.rerun()
+# ===================== 渲染游戏（简化调用，兼容所有Streamlit版本） =====================
+components.html(puzzle_html, height=900)
 
 st.write("---")
 st.write("💡 规则：开局默认打乱 | 自动还原不计成绩 | 手动通关上榜")
