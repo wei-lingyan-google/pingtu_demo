@@ -49,7 +49,7 @@ puzzle_html = """
         .stats { text-align: center; margin-bottom: 10px; font-weight: bold; }
         .puzzle-container { background: white; border-radius: 10px; padding: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 350px; margin: 0 auto; }
         .puzzle-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; aspect-ratio: 1; background: #333; border-radius: 6px; padding: 3px; }
-        .tile { background: #4ECDC4; background-size: 300% 300%; border-radius: 4px; cursor: pointer; transition: all 0.15s ease; }
+        .tile { background: #4ECDC4; background-size: 300% 300%; border-radius: 4px; cursor: pointer; transition: all 0.15s ease; display: flex; align-items: center; justify-content: center; }
         .tile:hover { transform: scale(1.02); }
         .tile.empty { background: #333 !important; cursor: default; }
         .tile.has-image { }
@@ -99,16 +99,17 @@ puzzle_html = """
     </div>
 
     <script>
-        let puzzleSize = 3;
-        let tiles = [];
+        const puzzleSize = 3;
+        let currentImageIndex = 0;
+        let currentCroppedUrl = '';
         let moves = 0;
         let timer = 0;
         let timerInterval = null;
         let isPlaying = false;
-        let currentCroppedUrl = '';
         
         const images = IMAGE_LIST_PLACEHOLDER;
-        let currentImageIndex = 0;
+        let tilePositions = [];
+        let emptyIndex = puzzleSize * puzzleSize - 1;
         
         function loadAndCropImage(imageUrl) {
             return new Promise(function(resolve, reject) {
@@ -153,6 +154,65 @@ puzzle_html = """
             });
         }
         
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+        
+        function isSolvable(positions) {
+            let inversions = 0;
+            for (let i = 0; i < positions.length; i++) {
+                for (let j = i + 1; j < positions.length; j++) {
+                    if (positions[i] > positions[j]) inversions++;
+                }
+            }
+            return inversions % 2 === 0;
+        }
+        
+        function initTilePositions() {
+            const totalTiles = puzzleSize * puzzleSize;
+            tilePositions = [];
+            for (let i = 0; i < totalTiles - 1; i++) {
+                tilePositions.push(i);
+            }
+            tilePositions.push(-1);
+            emptyIndex = totalTiles - 1;
+            
+            shuffleArray(tilePositions);
+            while (!isSolvable(tilePositions)) {
+                shuffleArray(tilePositions);
+            }
+        }
+        
+        function renderGrid() {
+            const grid = document.getElementById('puzzleGrid');
+            grid.innerHTML = '';
+            
+            for (let i = 0; i < tilePositions.length; i++) {
+                const tileValue = tilePositions[i];
+                const tile = document.createElement('div');
+                
+                if (tileValue === -1) {
+                    tile.className = 'tile empty';
+                } else {
+                    tile.className = 'tile has-image';
+                    tile.dataset.tileIndex = tileValue;
+                    tile.dataset.gridIndex = i;
+                    
+                    const bgX = (tileValue % puzzleSize) * 100;
+                    const bgY = Math.floor(tileValue / puzzleSize) * 100;
+                    tile.style.backgroundImage = 'url(' + currentCroppedUrl + ')';
+                    tile.style.backgroundPosition = bgX + '% ' + bgY + '%';
+                    
+                    tile.addEventListener('click', function() { onTileClick(i); });
+                }
+                
+                grid.appendChild(tile);
+            }
+        }
+        
         async function initPuzzle() {
             stopTimer();
             moves = 0;
@@ -161,125 +221,37 @@ puzzle_html = """
             document.getElementById('moves').textContent = '0';
             document.getElementById('timer').textContent = '00:00';
             
-            const grid = document.getElementById('puzzleGrid');
-            grid.innerHTML = '';
-            tiles = [];
-            
-            try {
-                currentCroppedUrl = await loadAndCropImage(images[currentImageIndex]);
-                
-                const totalTiles = puzzleSize * puzzleSize - 1;
-                const positions = [];
-                for (let i = 0; i < puzzleSize; i++) {
-                    for (let j = 0; j < puzzleSize; j++) {
-                        if (!(i === puzzleSize - 1 && j === puzzleSize - 1)) {
-                            positions.push({ row: i, col: j });
-                        }
-                    }
-                }
-                
-                shuffleArray(positions);
-                while (!isSolvableWithEmpty(positions)) {
-                    shuffleArray(positions);
-                }
-                
-                let tileIndex = 0;
-                for (let i = 0; i < puzzleSize; i++) {
-                    for (let j = 0; j < puzzleSize; j++) {
-                        if (i === puzzleSize - 1 && j === puzzleSize - 1) {
-                            const emptyTile = document.createElement('div');
-                            emptyTile.className = 'tile empty';
-                            grid.appendChild(emptyTile);
-                        } else {
-                            const pos = positions[tileIndex];
-                            const tile = document.createElement('div');
-                            tile.className = 'tile has-image';
-                            tile.dataset.originalRow = Math.floor(tileIndex / puzzleSize);
-                            tile.dataset.originalCol = tileIndex % puzzleSize;
-                            tile.dataset.currentRow = pos.row;
-                            tile.dataset.currentCol = pos.col;
-                            
-                            const bgX = (tileIndex % puzzleSize) * 100;
-                            const bgY = Math.floor(tileIndex / puzzleSize) * 100;
-                            tile.style.backgroundImage = 'url(' + currentCroppedUrl + ')';
-                            tile.style.backgroundPosition = bgX + '% ' + bgY + '%';
-                            
-                            tile.addEventListener('click', function() { onTileClick(tile); });
-                            tiles.push(tile);
-                            grid.appendChild(tile);
-                            tileIndex++;
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error('Error:', error);
-            }
-            
+            currentCroppedUrl = await loadAndCropImage(images[currentImageIndex]);
+            initTilePositions();
+            renderGrid();
             loadLeaderboard();
         }
         
-        function shuffleArray(array) {
-            for (let i = array.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [array[i], array[j]] = [array[j], array[i]];
-            }
-        }
-        
-        function isSolvableWithEmpty(positions) {
-            let inversions = 0;
-            const flatPositions = positions.map(function(p) { return p.row * puzzleSize + p.col; });
-            for (let i = 0; i < flatPositions.length; i++) {
-                for (let j = i + 1; j < flatPositions.length; j++) {
-                    if (flatPositions[i] > flatPositions[j]) inversions++;
-                }
-            }
-            return inversions % 2 === 0;
-        }
-        
-        function onTileClick(tile) {
-            if (!isPlaying) { 
-                startTimer(); 
-                isPlaying = true; 
+        function onTileClick(gridIndex) {
+            if (tilePositions[gridIndex] === -1) return;
+            
+            if (!isPlaying) {
+                startTimer();
+                isPlaying = true;
             }
             
-            const row = parseInt(tile.dataset.currentRow);
-            const col = parseInt(tile.dataset.currentCol);
-            const grid = document.getElementById('puzzleGrid');
-            const gridItems = grid.children;
+            const row = Math.floor(gridIndex / puzzleSize);
+            const col = gridIndex % puzzleSize;
+            const emptyRow = Math.floor(emptyIndex / puzzleSize);
+            const emptyCol = emptyIndex % puzzleSize;
             
-            let emptyItem = null;
-            let emptyPos = null;
-            for (let i = 0; i < gridItems.length; i++) {
-                const item = gridItems[i];
-                if (item.classList.contains('empty')) {
-                    const ir = Math.floor(i / puzzleSize);
-                    const ic = i % puzzleSize;
-                    if ((Math.abs(ir - row) === 1 && ic === col) || (Math.abs(ic - col) === 1 && ir === row)) {
-                        emptyItem = item;
-                        emptyPos = { row: ir, col: ic, index: i };
-                        break;
-                    }
-                }
-            }
+            const rowDiff = Math.abs(row - emptyRow);
+            const colDiff = Math.abs(col - emptyCol);
             
-            if (emptyPos && emptyItem) {
-                const tileIndex = row * puzzleSize + col;
-                tile.dataset.currentRow = emptyPos.row;
-                tile.dataset.currentCol = emptyPos.col;
-                
-                const tileRef = tile;
-                const emptyRef = emptyItem;
-                const tileNextSibling = tileRef.nextSibling;
-                
-                grid.insertBefore(emptyRef, tileRef);
-                if (tileNextSibling) {
-                    grid.insertBefore(tileRef, tileNextSibling);
-                } else {
-                    grid.appendChild(tileRef);
-                }
+            if ((rowDiff === 1 && colDiff === 0) || (rowDiff === 0 && colDiff === 1)) {
+                tilePositions[emptyIndex] = tilePositions[gridIndex];
+                tilePositions[gridIndex] = -1;
+                emptyIndex = gridIndex;
                 
                 moves++;
                 document.getElementById('moves').textContent = moves;
+                
+                renderGrid();
                 
                 if (checkWin()) {
                     stopTimer();
@@ -290,10 +262,10 @@ puzzle_html = """
         }
         
         function checkWin() {
-            return tiles.every(function(tile) {
-                return tile.dataset.originalRow === tile.dataset.currentRow &&
-                       tile.dataset.originalCol === tile.dataset.currentCol;
-            });
+            for (let i = 0; i < tilePositions.length - 1; i++) {
+                if (tilePositions[i] !== i) return false;
+            }
+            return tilePositions[tilePositions.length - 1] === -1;
         }
         
         function startTimer() {
@@ -306,9 +278,9 @@ puzzle_html = """
         }
         
         function stopTimer() {
-            if (timerInterval) { 
-                clearInterval(timerInterval); 
-                timerInterval = null; 
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
             }
         }
         
@@ -337,57 +309,8 @@ puzzle_html = """
             document.getElementById('moves').textContent = '0';
             document.getElementById('timer').textContent = '00:00';
             
-            const grid = document.getElementById('puzzleGrid');
-            grid.innerHTML = '';
-            tiles = [];
-            
-            try {
-                const totalTiles = puzzleSize * puzzleSize - 1;
-                const positions = [];
-                for (let i = 0; i < puzzleSize; i++) {
-                    for (let j = 0; j < puzzleSize; j++) {
-                        if (!(i === puzzleSize - 1 && j === puzzleSize - 1)) {
-                            positions.push({ row: i, col: j });
-                        }
-                    }
-                }
-                
-                shuffleArray(positions);
-                while (!isSolvableWithEmpty(positions)) {
-                    shuffleArray(positions);
-                }
-                
-                let tileIndex = 0;
-                for (let i = 0; i < puzzleSize; i++) {
-                    for (let j = 0; j < puzzleSize; j++) {
-                        if (i === puzzleSize - 1 && j === puzzleSize - 1) {
-                            const emptyTile = document.createElement('div');
-                            emptyTile.className = 'tile empty';
-                            grid.appendChild(emptyTile);
-                        } else {
-                            const pos = positions[tileIndex];
-                            const tile = document.createElement('div');
-                            tile.className = 'tile has-image';
-                            tile.dataset.originalRow = Math.floor(tileIndex / puzzleSize);
-                            tile.dataset.originalCol = tileIndex % puzzleSize;
-                            tile.dataset.currentRow = pos.row;
-                            tile.dataset.currentCol = pos.col;
-                            
-                            const bgX = (tileIndex % puzzleSize) * 100;
-                            const bgY = Math.floor(tileIndex / puzzleSize) * 100;
-                            tile.style.backgroundImage = 'url(' + currentCroppedUrl + ')';
-                            tile.style.backgroundPosition = bgX + '% ' + bgY + '%';
-                            
-                            tile.addEventListener('click', function() { onTileClick(tile); });
-                            tiles.push(tile);
-                            grid.appendChild(tile);
-                            tileIndex++;
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error('Error:', error);
-            }
+            initTilePositions();
+            renderGrid();
         }
         
         function changeImage() {
